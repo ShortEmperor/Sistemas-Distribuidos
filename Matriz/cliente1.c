@@ -5,7 +5,7 @@
 #include "matriz2.h"
 
 #define SERV 2
-#define N 32
+#define N 10 // antes 32: 32x32 = 1024 no cabe en A[100] de matriz.h y el cliente se colgaba
 
 int main(int argc, char *argv[])
 {
@@ -20,8 +20,13 @@ int main(int argc, char *argv[])
 
     int i, j, s;
     char *servidores[SERV] = {"localhost", "localhost"};
+    // ./cliente1 host_servidor1 host_servidor2  (sin argumentos usa localhost)
+    if(argc >= 3) {
+        servidores[0] = argv[1];
+        servidores[1] = argv[2];
+    }
     int programas[SERV] = {MATRIZ_PROG1, MATRIZ_PROG2};
-    int C[1024]; 
+    int C[1024];
     memset(C, 0, sizeof(C));
 
     // inicializamos matriz 

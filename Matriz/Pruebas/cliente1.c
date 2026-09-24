@@ -20,6 +20,11 @@ int main(int argc, char *argv[])
 
     int i, j, s;
     char *servidores[SERV] = {"localhost", "localhost"};
+    // ./cliente1 host_servidor1 host_servidor2  (sin argumentos usa localhost)
+    if(argc >= 3) {
+        servidores[0] = argv[1];
+        servidores[1] = argv[2];
+    }
     int programas[SERV] = {MATRIZ_PROG1, MATRIZ_PROG2};
     int C[10000]; 
     memset(C, 1, sizeof(C));
@@ -49,7 +54,9 @@ int main(int argc, char *argv[])
 
     for(s = 0; s < SERV; s++)
     {
-        clnt = clnt_create(servidores[s], programas[s], MATRIZ_VERS, "udp");
+        // antes "udp": 100x100 (80 KB de argumentos) no cabe en un mensaje UDP
+        // y daba "RPC: Can't encode arguments"
+        clnt = clnt_create(servidores[s], programas[s], MATRIZ_VERS, "tcp");
         if(clnt == NULL) {
             clnt_pcreateerror(servidores[s]);
             exit(1);

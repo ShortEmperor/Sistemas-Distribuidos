@@ -1,0 +1,34 @@
+# Matriz RPC (version de 2 servidores): servidor1 + servidor2 + cliente.
+# Levantar:  docker compose up -d --build
+# Probar:    docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2
+#
+# Variante Pruebas (N=100):
+#   VARIANTE=pruebas docker compose up -d
+#   docker exec -it rpc-matriz-cliente ./pruebas/cliente1 servidor1 servidor2
+
+x-rpc: &rpc
+  build: .
+  image: rpc-matriz:latest
+  networks: [rpc]
+
+services:
+  servidor1:
+    <<: *rpc
+    hostname: servidor1
+    container_name: rpc-matriz-servidor1
+    environment: [SERVIDOR=1, "VARIANTE=${VARIANTE:-principal}"]
+  servidor2:
+    <<: *rpc
+    hostname: servidor2
+    container_name: rpc-matriz-servidor2
+    environment: [SERVIDOR=2, "VARIANTE=${VARIANTE:-principal}"]
+
+  cliente:
+    <<: *rpc
+    hostname: cliente
+    container_name: rpc-matriz-cliente
+    depends_on: [servidor1, servidor2]
+    command: ["sleep", "infinity"]
+
+networks:
+  rpc:

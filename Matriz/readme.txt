@@ -16,7 +16,7 @@ opcion2:
 gcc -o servidor servidor.c matriz_svc.c matriz_xdr.c -I/usr/include/tirpc -ltirpc
 
 
-gcc -o cliente clientem.c matriz_clnt.c matriz_xdr.c -I/usr/include/tirpc -ltirp
+gcc -o cliente clientem.c matriz_clnt.c matriz_xdr.c -I/usr/include/tirpc -ltirpc
 
 
 ejecutar el cliente
