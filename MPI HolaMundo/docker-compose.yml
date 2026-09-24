@@ -1,0 +1,22 @@
+# 2 "computadoras" (contenedores) en la misma red.
+# Levantar:  docker compose up -d --build
+# Probar:    docker exec -it -u mpi mpi-hola-nodo1 mpirun -np 2 --hostfile hosts.txt python3 hola_mpi.py
+
+x-nodo: &nodo
+  build: .
+  image: mpi-holamundo:latest
+  shm_size: 256m
+  networks: [mpi]
+
+services:
+  nodo1:
+    <<: *nodo
+    hostname: nodo1
+    container_name: mpi-hola-nodo1
+  nodo2:
+    <<: *nodo
+    hostname: nodo2
+    container_name: mpi-hola-nodo2
+
+networks:
+  mpi:

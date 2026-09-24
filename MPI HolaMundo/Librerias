@@ -25,7 +25,7 @@ sudo systemctl status sshd
 sudo systemctl start sshd
 
 #agregar mpirun directamente
-export PATH="$HOME/.local/bin:$HOME/bin//usr/lib64/openmpi/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/bin:/usr/lib64/openmpi/bin:$PATH"
 
 #--para cambiar la ip 
  sudo ip addr add 10.10.10.2/24 dev eth0 label eth0:1
