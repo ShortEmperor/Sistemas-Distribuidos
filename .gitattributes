@@ -1,0 +1,7 @@
+# Archivos que se copian a los contenedores Linux: siempre con fin de linea LF,
+# aunque se clone en Windows (con CRLF el hostfile de MPI o los scripts pueden fallar).
+Dockerfile          text eol=lf
+docker-compose.yml  text eol=lf
+hosts               text eol=lf
+hosts.txt           text eol=lf
+*.py                text eol=lf
