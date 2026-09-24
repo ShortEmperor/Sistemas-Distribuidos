@@ -1,0 +1,36 @@
+# Matriz RPC distribuida: 4 servidores + 1 cliente.
+# Levantar:  docker compose up -d --build
+# Probar:    docker exec -it rpc-matdist-cliente ./cliente 1000 --verificar servidor1 servidor2 servidor3 servidor4
+
+x-rpc: &rpc
+  build: .
+  image: rpc-matriz-distribuida:latest
+  networks: [rpc]
+
+services:
+  servidor1:
+    <<: *rpc
+    hostname: servidor1
+    container_name: rpc-matdist-servidor1
+  servidor2:
+    <<: *rpc
+    hostname: servidor2
+    container_name: rpc-matdist-servidor2
+  servidor3:
+    <<: *rpc
+    hostname: servidor3
+    container_name: rpc-matdist-servidor3
+  servidor4:
+    <<: *rpc
+    hostname: servidor4
+    container_name: rpc-matdist-servidor4
+
+  cliente:
+    <<: *rpc
+    hostname: cliente
+    container_name: rpc-matdist-cliente
+    depends_on: [servidor1, servidor2, servidor3, servidor4]
+    command: ["sleep", "infinity"]
+
+networks:
+  rpc:
