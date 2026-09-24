@@ -1,0 +1,24 @@
+# Calculadora RPC: 1 servidor (las 4 operaciones) + 1 cliente, en la misma red.
+# Levantar:  docker compose up -d --build
+# Probar:    docker exec -it rpc-calc-cliente ./cliente servidor
+
+x-rpc: &rpc
+  build: .
+  image: rpc-calculadora:latest
+  networks: [rpc]
+
+services:
+  servidor:
+    <<: *rpc
+    hostname: servidor
+    container_name: rpc-calc-servidor
+
+  cliente:
+    <<: *rpc
+    hostname: cliente
+    container_name: rpc-calc-cliente
+    depends_on: [servidor]
+    command: ["sleep", "infinity"]
+
+networks:
+  rpc:

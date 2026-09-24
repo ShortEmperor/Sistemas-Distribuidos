@@ -29,16 +29,36 @@ int main(int argc, char *argv[]) {
     scanf("%f", &nums.b);
 
     resultado = suma_1(&nums, clnt);
+    if (resultado == NULL) {
+        clnt_perror(clnt, "Error en Suma");
+        return 1;
+    }
     printf("Suma: %f\n", *resultado);
 
     resultado = resta_1(&nums, clnt);
+    if (resultado == NULL) {
+        clnt_perror(clnt, "Error en Resta");
+        return 1;
+    }
     printf("Resta: %f\n", *resultado);
 
     resultado = multiplicacion_1(&nums, clnt);
+    if (resultado == NULL) {
+        clnt_perror(clnt, "Error en Multiplicacion");
+        return 1;
+    }
     printf("Multiplicacion: %f\n", *resultado);
 
     resultado = division_1(&nums, clnt);
-    printf("Division: %f\n", *resultado);
+    if (resultado == NULL) {
+        clnt_perror(clnt, "Error en Division");
+        return 1;
+    }
+    if (nums.b == 0) {
+        printf("Division: no se puede dividir entre 0\n");
+    } else {
+        printf("Division: %f\n", *resultado);
+    }
 
     clnt_destroy(clnt);
     return 0;
