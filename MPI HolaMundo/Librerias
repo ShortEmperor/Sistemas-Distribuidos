@@ -1,1 +1,32 @@
+#instalar librerías
+sudo dnf install openmpi openmpi-devel python3-mpi4py-openmpi -y
+
+#cambiar nombre:
+sudo hostnamectl set-hostname nodo1
+
+
+#editar archivo de hosts:
+sudo nano /etc/hosts
+agregar doreccion ip y los nombres de host
+
+#para agregar firewall de ssh
+sudo firewall-cmd --add-service=ssh --permanent
+sudo firewall-cmd --reload
+
+#activar y desactivar firewall
+sudo dnf install ufw --instalar
+sudo ufw disable
+sudo ufw enable
+
+
+#Check Status: 
+sudo systemctl status sshd
+#Start Service:
+sudo systemctl start sshd
+
+#agregar mpirun directamente
+export PATH="$HOME/.local/bin:$HOME/bin//usr/lib64/openmpi/bin:$PATH"
+
+#--para cambiar la ip 
+ sudo ip addr add 10.10.10.2/24 dev eth0 label eth0:1
 
