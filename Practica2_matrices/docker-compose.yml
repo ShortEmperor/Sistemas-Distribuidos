@@ -1,0 +1,36 @@
+# Practica2_matrices: 4 servidores + 1 cliente.
+# Levantar:  docker compose up -d --build
+# Probar:    docker exec -it p2-matriz-cliente ./cliente servidor1 servidor2 servidor3 servidor4
+
+x-rpc: &rpc
+  build: .
+  image: p2-matriz:latest
+  networks: [rpc]
+
+services:
+  servidor1:
+    <<: *rpc
+    hostname: servidor1
+    container_name: p2-matriz-servidor1
+  servidor2:
+    <<: *rpc
+    hostname: servidor2
+    container_name: p2-matriz-servidor2
+  servidor3:
+    <<: *rpc
+    hostname: servidor3
+    container_name: p2-matriz-servidor3
+  servidor4:
+    <<: *rpc
+    hostname: servidor4
+    container_name: p2-matriz-servidor4
+
+  cliente:
+    <<: *rpc
+    hostname: cliente
+    container_name: p2-matriz-cliente
+    depends_on: [servidor1, servidor2, servidor3, servidor4]
+    command: ["sleep", "infinity"]
+
+networks:
+  rpc:

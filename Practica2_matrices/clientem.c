@@ -3,6 +3,7 @@
 #include "matriz.h"
 
 #define N 4
+#define SERV 4
 
 int main(int argc, char *argv[])
 {
@@ -12,12 +13,21 @@ int main(int argc, char *argv[])
 
     int i, j, s;
 
-    char *servidores[2] = {
+    // antes era servidores[2] pero el ciclo va de 0 a 3:
+    // servidores[2] y servidores[3] eran basura -> Segmentation fault
+    char *servidores[SERV] = {
         "192.168.229.48",
-        "192.168.229.50"/*,
+        "192.168.229.50",
         "192.168.1.13",
-        "192.168.1.14"*/
+        "192.168.1.14"
     };
+
+    // ./cliente host1 host2 host3 host4  (sin argumentos usa las IPs de arriba)
+    if(argc > SERV)
+    {
+        for(s = 0; s < SERV; s++)
+            servidores[s] = argv[s + 1];
+    }
 
     m.n = N;
 
@@ -45,18 +55,23 @@ int main(int argc, char *argv[])
         printf("\n");
     }
 
-    int bloque = N / 4;
+    int bloque = N / SERV;
 
-    for(s = 0; s < 4; s++)
+    for(s = 0; s < SERV; s++)
     {
         m.fila_inicio = s * bloque;
         m.fila_fin = (s + 1) * bloque;
+        // si N no es divisible entre SERV, el ultimo servidor hace las filas que sobran
+        if(s == SERV - 1)
+            m.fila_fin = N;
 
+        // antes "udp": A[10000] y B[10000] siempre viajan completos (80 KB)
+        // aunque N sea 4, no caben en UDP -> "RPC: Can't encode arguments"
         clnt = clnt_create(
             servidores[s],
             MATRIZ_PROG,
             MATRIZ_VERS,
-            "udp"
+            "tcp"
         );
 
         if(clnt == NULL)
