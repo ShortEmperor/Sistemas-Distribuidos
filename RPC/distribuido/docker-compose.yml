@@ -1,0 +1,40 @@
+# Calculadora RPC distribuida: 4 computadoras, una por operacion, + 1 cliente.
+# Levantar:  docker compose up -d --build
+# Probar:    docker exec -it rpc-dist-cliente ./cliente suma resta multiplicacion division
+
+x-rpc: &rpc
+  build: .
+  image: rpc-calculadora-distribuida:latest
+  networks: [rpc]
+
+services:
+  suma:
+    <<: *rpc
+    hostname: suma
+    container_name: rpc-dist-suma
+    environment: [OPERACION=suma]
+  resta:
+    <<: *rpc
+    hostname: resta
+    container_name: rpc-dist-resta
+    environment: [OPERACION=resta]
+  multiplicacion:
+    <<: *rpc
+    hostname: multiplicacion
+    container_name: rpc-dist-multiplicacion
+    environment: [OPERACION=multiplicacion]
+  division:
+    <<: *rpc
+    hostname: division
+    container_name: rpc-dist-division
+    environment: [OPERACION=division]
+
+  cliente:
+    <<: *rpc
+    hostname: cliente
+    container_name: rpc-dist-cliente
+    depends_on: [suma, resta, multiplicacion, division]
+    command: ["sleep", "infinity"]
+
+networks:
+  rpc:
