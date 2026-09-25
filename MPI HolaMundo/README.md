@@ -55,6 +55,8 @@ con `mpirun` y mandar un mensaje entre ellas.
   + `python3-mpi4py` + servidor ssh.
 - **ssh sin contraseña**: la llave se genera al construir la imagen, así los dos nodos la
   comparten y confían entre sí (equivale a `ssh-copy-id` en las máquinas reales).
+- **Solo `nodo1` construye la imagen** (`build` + `pull_policy: build`); `nodo2` usa esa misma
+  imagen (`pull_policy: never`), para que los dos tengan exactamente la misma llave ssh.
 - Se usa el usuario **`mpi`**: `mpirun` no deja correr como `root`.
 - `python-is-python3`: para que funcione `python` (como en Fedora) además de `python3`.
 - `hosts.txt` con **`slots=1`**: así `-np 2` pone un proceso en cada máquina.

@@ -2,9 +2,10 @@
 # Levantar:  docker compose up -d --build
 # Probar:    docker exec -it rpc-matdist-cliente ./cliente 1000 --verificar servidor1 servidor2 servidor3 servidor4
 
+name: rpc-matriz-distribuida
+
 x-rpc: &rpc
   build: .
-  image: rpc-matriz-distribuida:latest
   networks: [rpc]
 
 services:

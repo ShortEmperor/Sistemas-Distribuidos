@@ -2,9 +2,10 @@
 # Levantar:  docker compose up -d --build
 # Probar:    docker exec -it rpc-dist-cliente ./cliente suma resta multiplicacion division
 
+name: rpc-calculadora-distribuida
+
 x-rpc: &rpc
   build: .
-  image: rpc-calculadora-distribuida:latest
   networks: [rpc]
 
 services:

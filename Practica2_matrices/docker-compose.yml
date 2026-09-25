@@ -2,9 +2,10 @@
 # Levantar:  docker compose up -d --build
 # Probar:    docker exec -it p2-matriz-cliente ./cliente servidor1 servidor2 servidor3 servidor4
 
+name: practica2-matrices
+
 x-rpc: &rpc
   build: .
-  image: p2-matriz:latest
   networks: [rpc]
 
 services:

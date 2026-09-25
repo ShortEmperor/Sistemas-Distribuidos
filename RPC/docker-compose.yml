@@ -2,9 +2,10 @@
 # Levantar:  docker compose up -d --build
 # Probar:    docker exec -it rpc-calc-cliente ./cliente servidor
 
+name: rpc-calculadora
+
 x-rpc: &rpc
   build: .
-  image: rpc-calculadora:latest
   networks: [rpc]
 
 services:

@@ -62,6 +62,10 @@ y junta el resultado.
 
 - 4 contenedores (`nodo1` … `nodo4`) con la misma imagen: `debian:bookworm-slim` + OpenMPI +
   `gcc` + servidor ssh.
+- **Solo `nodo1` construye la imagen** (`build` + `pull_policy: build`); `nodo2`…`nodo4` usan
+  esa misma imagen (`pull_policy: never`). Así los 4 tienen exactamente la misma llave ssh.
+  Si cada nodo construyera su propia imagen, cada uno podría generar una llave distinta y
+  `mpirun` no podría entrar a los demás nodos.
 - El programa se compila con `mpicc` al construir la imagen, así queda **en la misma ruta en
   todos los nodos** (`/home/mpi/matriz_mpi`), como pide MPI.
 - **ssh sin contraseña**: la llave se genera al construir la imagen y la comparten todos los

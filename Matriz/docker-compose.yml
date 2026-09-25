@@ -6,9 +6,10 @@
 #   VARIANTE=pruebas docker compose up -d
 #   docker exec -it rpc-matriz-cliente ./pruebas/cliente1 servidor1 servidor2
 
+name: rpc-matriz
+
 x-rpc: &rpc
   build: .
-  image: rpc-matriz:latest
   networks: [rpc]
 
 services:
