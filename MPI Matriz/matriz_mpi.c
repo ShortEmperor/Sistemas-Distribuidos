@@ -115,7 +115,8 @@ int main(int argc, char *argv[])
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    /* el maestro genera las matrices (numeros del 0 al 9) */
+    /* el maestro genera las matrices: A y B de puros 1, asi cada C[i][j] es la
+     * suma de N productos 1*1 = N (resultado predecible y facil de revisar) */
     if (rank == 0) {
         A = malloc((size_t)N * N * sizeof(int));
         C = malloc((size_t)N * N * sizeof(int));
@@ -123,10 +124,9 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Maestro: sin memoria para N=%d\n", N);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        srand(42);
         for (i = 0; i < N * N; i++) {
-            A[i] = rand() % 10;
-            B[i] = rand() % 10;
+            A[i] = 1;
+            B[i] = 1;
         }
         printf("Multiplicando matrices de %dx%d con %d procesos\n", N, N, size);
         fflush(stdout);
@@ -190,6 +190,12 @@ int main(int argc, char *argv[])
             free(C_serial);
         }
 
+        /* con A y B de puros 1, todos los valores de C deben ser N */
+        long distintos = 0;
+        for (i = 0; i < N * N; i++)
+            if (C[i] != N)
+                distintos++;
+
         /* matrices completas (fuera de la medicion de tiempo) */
         if (imprimir_matrices) {
             imprimir("A", A, N);
@@ -199,6 +205,10 @@ int main(int argc, char *argv[])
 
         /* el resumen al final, para verlo aunque las matrices sean enormes */
         printf("Tiempo total (envio + calculo + recoleccion): %.3f s\n", t_total);
+        if (distintos == 0)
+            printf("Todos los valores de C son %d (= N): CORRECTO\n", N);
+        else
+            printf("ERROR: %ld valores de C no son %d (= N)\n", distintos, N);
         if (verificar) {
             printf("Verificacion contra version secuencial: %s\n",
                    correcto ? "CORRECTO" : "ERROR");
