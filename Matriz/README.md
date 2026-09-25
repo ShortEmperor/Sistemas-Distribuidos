@@ -52,7 +52,7 @@ no puede pasar del tamaño del arreglo.
 
 | Archivo / carpeta | Qué es |
 |-------------------|--------|
-| `cliente1.c` | **Cliente que funciona** (2 servidores, `N 10`) |
+| `cliente1.c` | **Cliente que funciona** (2 servidores, `N` por argumento, de 1 a 10) |
 | `servidor1.c`, `servidor2.c` | **Servidores que funcionan** |
 | `matriz.h`, `matriz_*.c` / `matriz2.h`, `matriz2_*.c` | Generados por rpcgen para PROG1 / PROG2 (arreglos de 100) |
 | `matriz.x`, `matriz2.x` | Definiciones RPC; **no coinciden** con los `.h` que se usan (ver errores) |
@@ -60,7 +60,7 @@ no puede pasar del tamaño del arreglo.
 | `clientem.c` | Intento anterior (un solo tipo `matrices`); no compila |
 | `servidor.c`, `cliente1.x` | Vacíos |
 | `Servidor1/`, `Servidor2/` | Copias para correr cada servidor en una máquina distinta (arreglos de 4) |
-| `Pruebas/` | Variante con `N 100` y arreglos de 10000; `matriz3.x` y `matriz4.x` son borradores para 4 servidores |
+| `Pruebas/` | Variante con arreglos de 10000 (`N` de 1 a 100, por defecto 100); `matriz3.x` y `matriz4.x` son borradores para 4 servidores |
 | `cliente`, `cliente1`, `*/servidor*` | Binarios viejos (no se usan) |
 | `readme.txt` | Readme original |
 | `Dockerfile`, `docker-compose.yml` | Entorno Docker |
@@ -68,8 +68,8 @@ no puede pasar del tamaño del arreglo.
 **Docker**
 
 - La imagen compila **2 variantes** usando los `.h`/`.c` generados que ya estaban en el repo:
-  - `principal`: archivos de esta carpeta (`N = 10`, arreglos de 100).
-  - `pruebas`: carpeta `Pruebas/` (`N = 100`, arreglos de 10000).
+  - `principal`: archivos de esta carpeta (arreglos de 100 → `N` máximo 10).
+  - `pruebas`: carpeta `Pruebas/` (arreglos de 10000 → `N` máximo 100).
 - La variable `VARIANTE` elige qué servidores arrancan (por defecto `principal`). Cliente y
   servidores **deben ser de la misma variante** (los tamaños de los arreglos tienen que coincidir).
 - Cada servidor arranca `rpcbind` y después su programa. `stdbuf -oL` hace que sus `printf`
@@ -88,17 +88,19 @@ Las matrices se guardan en **arreglos de una dimensión**: el elemento `(i, j)` 
 | Paso | Código | Qué hace |
 |------|--------|----------|
 | 1 | `#include "matriz.h"` y `#include "matriz2.h"` | Incluye los 2 programas RPC: tipos `matrices1`/`resultado1` (servidor 1) y `matrices2`/`resultado2` (servidor 2) |
-| 2 | `#define SERV 2`, `#define N 10` | 2 servidores, matriz de 10 × 10 (lo máximo que cabe en `A[100]`) |
+| 2 | `#define SERV 2`, `int N = N_DEFECTO` (10) | 2 servidores; `N` es una variable para poder cambiarla con un argumento |
 | 3 | `servidores[SERV] = {"localhost", "localhost"}` + `if (argc >= 3)` | Por defecto los 2 servidores en la misma máquina; con argumentos se usan otros hosts |
 | 4 | `programas[SERV] = {MATRIZ_PROG1, MATRIZ_PROG2}` | Número de programa de cada servidor |
 | 5 | `int C[1024]; memset(C, 0, ...)` | Matriz resultado completa, en el cliente |
-| 6 | 2 ciclos `m1.A[i*N + j] = 1`, `m1.B[...] = 1` | Llena A y B con puros 1 (la fórmula original quedó comentada) y las imprime |
-| 7 | `bloque = N / SERV` | Filas por servidor (5) |
-| 8 | `clnt_create(servidores[s], programas[s], MATRIZ_VERS, "udp")` | Conecta al servidor `s` por UDP |
-| 9 | `s == 0`: `m1.fila_inicio = 0; m1.fila_fin = bloque;` `res1 = multiplicar1_1(&m1, clnt)` | Pide al servidor 1 las filas 0..4. Imprime esas filas de `res1->C` y las copia en `C` |
-| 10 | `s == 1`: `m2.fila_inicio = bloque; m2.fila_fin = N;` `memcpy(m2.A, m1.A, ...)` `res2 = multiplicar2_1(&m2, clnt)` | Como el servidor 2 usa otro tipo (`matrices2`), se copian A y B de `m1` a `m2`. Pide las filas 5..9 y las copia en `C` |
-| 11 | `clnt_destroy(clnt)` | Cierra la conexión (dentro del ciclo) |
-| 12 | último ciclo | Imprime la matriz `C` completa |
+| 6 | `elementos = sizeof(m1.A) / sizeof(int)` (y lo mismo con `m2.A` y `C`, se queda el menor); `while ((n_max+1)*(n_max+1) <= elementos) n_max++` | Calcula el `N` máximo **a partir del tamaño real de los arreglos** de los `.h`: con `A[100]` da 10, con `A[10000]` da 100 |
+| 7 | `if (argc >= 4) N = atoi(argv[3])` + `if (N < 1 \|\| N > n_max)` | `N` opcional como tercer argumento. Si no cabe en los arreglos se rechaza con un mensaje, en lugar de desbordarlos (lo que colgaba al cliente con `N 32`) |
+| 8 | 2 ciclos `m1.A[i*N + j] = 1`, `m1.B[...] = 1` | Llena A y B con puros 1 (la fórmula original quedó comentada) y las imprime |
+| 9 | `bloque = N / SERV` | Filas por servidor (con N = 10: 5) |
+| 10 | `clnt_create(servidores[s], programas[s], MATRIZ_VERS, "udp")` | Conecta al servidor `s` por UDP |
+| 11 | `s == 0`: `m1.fila_inicio = 0; m1.fila_fin = bloque;` `res1 = multiplicar1_1(&m1, clnt)` | Pide al servidor 1 las filas `0` a `bloque - 1`. Imprime esas filas de `res1->C` y las copia en `C` |
+| 12 | `s == 1`: `m2.fila_inicio = bloque; m2.fila_fin = N;` `memcpy(m2.A, m1.A, ...)` `res2 = multiplicar2_1(&m2, clnt)` | Como el servidor 2 usa otro tipo (`matrices2`), se copian A y B de `m1` a `m2`. Pide las filas `bloque` a `N - 1` (con N impar le toca una más) y las copia en `C` |
+| 13 | `clnt_destroy(clnt)` | Cierra la conexión (dentro del ciclo) |
+| 14 | último ciclo | Imprime la matriz `C` completa |
 
 Las llamadas están dentro de un `for`: **primero el servidor 1 y cuando responde el servidor 2**.
 
@@ -151,8 +153,8 @@ resultado1 *multiplicar1_1_svc(matrices1 *m, struct svc_req *req) {
 - **`Servidor1/`, `Servidor2/`**: copias de cada servidor para compilarlo en su propia máquina.
   Sus `.x` usan los tipos `matrices`/`resultado` con arreglos de **4** (N máximo 2).
   `Servidor1/servidor.c` y `Servidor2/cliente1.c` están vacíos.
-- **`Pruebas/`**: mismos `cliente1.c`, `servidor1.c`, `servidor2.c` pero con `N 100` y
-  arreglos de 10000 (sus `.x` sí coinciden con sus `.h`). `matriz3.x` (+ sus archivos
+- **`Pruebas/`**: mismos `cliente1.c`, `servidor1.c`, `servidor2.c` pero con `N` por defecto 100
+  y arreglos de 10000 (sus `.x` sí coinciden con sus `.h`). `matriz3.x` (+ sus archivos
   generados) es un tercer programa `0x20000003` sin servidor; `matriz4.x` es un borrador de un
   cuarto (`0x20000004`, con el nombre `MATRIZ_PROG1` repetido y el campo `filas_inicio`).
 - **`matriz.x` / `matriz2.x`** de esta carpeta: no coinciden con los `.h` que se usan
@@ -190,18 +192,54 @@ docker compose down
 
 ## Pruebas
 
-**Variante principal (N = 10)**
+Uso: `./cliente1 [host_servidor1 host_servidor2 [N]]`
+
+- Sin argumentos: los 2 servidores en `localhost` y el `N` por defecto.
+- `N` es opcional y va **después** de los 2 hosts. Tiene que caber en los arreglos de los `.h`:
+  de 1 a **10** en `principal` (arreglos de 100) y de 1 a **100** en `pruebas` (arreglos de
+  10000). Si no cabe, el cliente lo rechaza.
+- Siempre se imprimen **completas** A, B, las filas de cada servidor y C.
+- A y B son puros 1, así que **todos los valores de C deben ser `N`**.
+
+**Variante principal**
 
 ```bash
-docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2
+docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2       # N = 10
+docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2 3     # N = 3
 ```
 ```
+Matriz A:
+1 1 1
+1 1 1
+1 1 1
+
+Matriz B:
+1 1 1
+1 1 1
+1 1 1
+
 Resultado parcial servidor 1:
-10 10 10 10 10 10 10 10 10 10
-...
+3 3 3
+
+Resultado parcial servidor 2:
+3 3 3
+3 3 3
+
 Matriz resultado C completa:
-10 10 10 10 10 10 10 10 10 10
-...
+3 3 3
+3 3 3
+3 3 3
+```
+
+Con `N` impar el servidor 2 hace una fila más (`bloque = N / 2` se redondea hacia abajo).
+
+**`N` que no cabe en los arreglos**
+
+```bash
+docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2 11
+```
+```
+N debe estar entre 1 y 10: los arreglos de matriz.h/matriz2.h son de 100 elementos
 ```
 
 **Qué calculó cada servidor**
@@ -211,16 +249,18 @@ docker logs rpc-matriz-servidor1     # Servidor 1 calculó filas 0 a 4
 docker logs rpc-matriz-servidor2     # Servidor 2 calculó filas 5 a 9
 ```
 
-**Variante Pruebas (N = 100)** — hay que reiniciar los servidores con esa variante:
+**Variante Pruebas** — hay que reiniciar los servidores con esa variante:
 
 ```bash
 VARIANTE=pruebas docker compose up -d          # bash
 $env:VARIANTE="pruebas"; docker compose up -d  # PowerShell
 
-docker exec -it rpc-matriz-cliente ./pruebas/cliente1 servidor1 servidor2
+docker exec -it rpc-matriz-cliente ./pruebas/cliente1 servidor1 servidor2         # N = 100
+docker exec -it rpc-matriz-cliente ./pruebas/cliente1 servidor1 servidor2 37      # N = 37
+docker exec -it rpc-matriz-cliente ./pruebas/cliente1 servidor1 servidor2 101     # se rechaza
 ```
 
-C sale con 10000 valores iguales a `100`. Para regresar a la principal:
+Con `N = 100`, C sale con 10000 valores iguales a `100`. Para regresar a la principal:
 `docker compose up -d` (sin `VARIANTE`).
 
 ## Errores encontrados y correcciones
@@ -229,7 +269,7 @@ Se ejecutó todo como estaba (en una sola máquina con `localhost`, como se prob
 
 | # | Problema | Evidencia | Corrección |
 |---|----------|-----------|------------|
-| 1 | `cliente1.c` con `N 32`: 32×32 = 1024 números no caben en `A[100]` de `matriz.h`; se escribe fuera del arreglo y se pisan las variables del ciclo | El cliente se queda **colgado** imprimiendo `1 1 1 ...` para siempre | `N 10` (lo máximo que cabe en `A[100]`) |
+| 1 | `cliente1.c` con `N 32`: 32×32 = 1024 números no caben en `A[100]` de `matriz.h`; se escribe fuera del arreglo y se pisan las variables del ciclo | El cliente se queda **colgado** imprimiendo `1 1 1 ...` para siempre | `N` por defecto 10, y se puede pasar como argumento: el cliente calcula el máximo que cabe en los arreglos y rechaza un `N` más grande |
 | 2 | `Pruebas/cliente1.c` con `N 100`: A y B de 100×100 son 80 KB y **no caben en un mensaje UDP**. Esto es lo que no dejaba crecer la matriz | `Error en Servidor 1: RPC: Can't encode arguments` | `"udp"` → `"tcp"` |
 | 3 | Los dos `cliente1.c` tenían `"localhost"` fijo: solo funcionaban con los servidores en la misma máquina | — | `./cliente1 host1 host2` (sin argumentos sigue usando `localhost`) |
 | 4 | `cliente.c` y `clientem.c` no compilan con los `.h` actuales | `error: unknown type name 'matrices'; did you mean 'matrices1'?` | Se dejan como están (intentos anteriores) |

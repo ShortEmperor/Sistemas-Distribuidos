@@ -5,10 +5,14 @@
 #include "matriz2.h"
 
 #define SERV 2
-#define N 10 // antes 32: 32x32 = 1024 no cabe en A[100] de matriz.h y el cliente se colgaba
+// antes "#define N 32": 32x32 = 1024 no cabe en A[100] de matriz.h y el cliente se colgaba.
+// Ahora N se puede pasar como tercer argumento (por defecto 10) y se valida contra
+// el tamaño de los arreglos.
+#define N_DEFECTO 10
 
 int main(int argc, char *argv[])
 {
+    int N = N_DEFECTO;
     CLIENT *clnt;
     //matriz para cada servidor
     matrices1 m1; 
@@ -20,7 +24,7 @@ int main(int argc, char *argv[])
 
     int i, j, s;
     char *servidores[SERV] = {"localhost", "localhost"};
-    // ./cliente1 host_servidor1 host_servidor2  (sin argumentos usa localhost)
+    // ./cliente1 host_servidor1 host_servidor2 [N]  (sin argumentos usa localhost y N=10)
     if(argc >= 3) {
         servidores[0] = argv[1];
         servidores[1] = argv[2];
@@ -28,6 +32,23 @@ int main(int argc, char *argv[])
     int programas[SERV] = {MATRIZ_PROG1, MATRIZ_PROG2};
     int C[1024];
     memset(C, 0, sizeof(C));
+
+    // N maximo: el mas grande con N*N <= elementos del arreglo mas chico (A de matriz.h,
+    // A de matriz2.h o C). Con A[100] da 10.
+    int elementos = sizeof(m1.A) / sizeof(int);
+    if(sizeof(m2.A) / sizeof(int) < elementos) elementos = sizeof(m2.A) / sizeof(int);
+    if(sizeof(C) / sizeof(int) < elementos) elementos = sizeof(C) / sizeof(int);
+    int n_max = 1;
+    while((n_max + 1) * (n_max + 1) <= elementos) n_max++;
+
+    if(argc >= 4) {
+        N = atoi(argv[3]);
+        if(N < 1 || N > n_max) {
+            printf("N debe estar entre 1 y %d: los arreglos de matriz.h/matriz2.h son de %d elementos\n",
+                   n_max, elementos);
+            return 1;
+        }
+    }
 
     // inicializamos matriz 
     m1.n = N;

@@ -1,6 +1,6 @@
 # Matriz RPC (version de 2 servidores): servidor1 + servidor2 + cliente.
 # Levantar:  docker compose up -d --build
-# Probar:    docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2
+# Probar:    docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2 [N]
 #
 # Variante Pruebas (N=100):
 #   VARIANTE=pruebas docker compose up -d
