@@ -73,6 +73,145 @@ Programa `OPERACIONES_PROG = 0x20000001`, versión `1`.
 - Contenedor `cliente`: se queda encendido (`sleep infinity`) para entrar con `docker exec`.
 - Los dos contenedores están en la misma red de Docker y se encuentran por nombre (`servidor`).
 
+## Código explicado
+
+### `calculadora.x` — la interfaz
+
+```c
+struct numeros { float a; float b; };        // los 2 operandos viajan juntos
+
+program OPERACIONES_PROG {                   // nombre del programa
+    version OPERACIONES_VERS {               // versión (permite tener varias)
+        float SUMA(numeros) = 1;             // procedimiento número 1
+        float RESTA(numeros) = 2;
+        float MULTIPLICACION(numeros) = 3;
+        float DIVISION(numeros) = 4;
+    } = 1;
+} = 0x20000001;                              // número del programa (rango 0x20000000-0x3FFFFFFF es para usuarios)
+```
+
+No es código C: es el lenguaje de `rpcgen`. Un procedimiento RPC solo recibe **un** argumento,
+por eso `a` y `b` van dentro de la estructura `numeros`. Cliente y servidor se identifican por
+la tripleta *(número de programa, versión, número de procedimiento)*.
+
+### `cliente.c` — el cliente
+
+| Paso | Código | Qué hace |
+|------|--------|----------|
+| 1 | `if (argc < 2)` | Exige el nombre o IP del servidor como argumento |
+| 2 | `clnt_create(host, OPERACIONES_PROG, OPERACIONES_VERS, "udp")` | Le pregunta al **rpcbind** de `host` (puerto 111) en qué puerto está el programa `0x20000001` versión 1 y crea un *handle* `CLIENT*` para hablar con él por UDP. Si falla regresa `NULL` y `clnt_pcreateerror` imprime el motivo (`Unknown host`, `Program not registered`, `Timed out`...) |
+| 3 | `scanf("%f", &nums.a)` ... | Lee los 2 números en la estructura `numeros` |
+| 4 | `resultado = suma_1(&nums, clnt)` | Llama al *stub* generado: serializa `nums`, lo manda, espera y deserializa la respuesta. Regresa un **puntero** a un `float` que vive dentro del stub |
+| 5 | `if (resultado == NULL)` | La llamada falló (servidor caído, timeout de 25 s...). `clnt_perror` explica por qué y se termina |
+| 6 | lo mismo con `resta_1`, `multiplicacion_1`, `division_1` | Una llamada RPC por operación, las 4 al mismo servidor |
+| 7 | `if (nums.b == 0)` | El servidor regresa 0 al dividir entre 0; el cliente muestra el aviso en lugar del 0 |
+| 8 | `clnt_destroy(clnt)` | Cierra la conexión y libera el handle |
+
+### `calculadora_srv.c` — las operaciones del servidor
+
+```c
+float *suma_1_svc(numeros *argp, struct svc_req *rqstp) {
+    static float resultado;            // static: tiene que seguir existiendo al salir
+    resultado = argp->a + argp->b;
+    return &resultado;
+}
+```
+
+- El nombre `suma_1_svc` lo decide rpcgen: `<procedimiento en minúsculas>_<versión>_svc`.
+- `argp` ya llega **deserializado**: el código de red lo decodificó antes de llamar la función.
+- `rqstp` trae datos de la petición (quién llama, qué procedimiento); aquí no se usa.
+- El resultado se regresa como **puntero a una variable `static`**: después de que la función
+  termina, el despachador de `calculadora_svc.c` todavía tiene que leerlo para mandarlo. Una
+  variable local normal ya no existiría.
+- `division_1_svc` revisa `b == 0` y en ese caso regresa 0 (un `float` no tiene forma de
+  indicar error).
+
+### Archivos generados por `rpcgen calculadora.x`
+
+**`calculadora.h`** — lo comparten cliente y servidor:
+- `struct numeros` + `typedef`.
+- `#define OPERACIONES_PROG 0x20000001`, `OPERACIONES_VERS 1`, `SUMA 1`, `RESTA 2`, ...
+- Prototipos de los stubs del cliente (`suma_1(numeros *, CLIENT *)`) y de las funciones que
+  debe implementar el servidor (`suma_1_svc(numeros *, struct svc_req *)`).
+
+**`calculadora_xdr.c`** — serialización:
+```c
+bool_t xdr_numeros(XDR *xdrs, numeros *objp) {
+    if (!xdr_float(xdrs, &objp->a)) return FALSE;
+    if (!xdr_float(xdrs, &objp->b)) return FALSE;
+    return TRUE;
+}
+```
+La **misma función codifica y decodifica**: `xdrs` indica la dirección (`XDR_ENCODE` al mandar,
+`XDR_DECODE` al recibir). XDR es un formato estándar (big-endian, múltiplos de 4 bytes), así
+funciona entre máquinas con distinta arquitectura.
+
+**`calculadora_clnt.c`** — stubs del cliente:
+```c
+static struct timeval TIMEOUT = { 25, 0 };
+float *suma_1(numeros *argp, CLIENT *clnt) {
+    static float clnt_res;
+    memset(&clnt_res, 0, sizeof(clnt_res));
+    if (clnt_call(clnt, SUMA, xdr_numeros, argp, xdr_float, &clnt_res, TIMEOUT) != RPC_SUCCESS)
+        return NULL;
+    return &clnt_res;
+}
+```
+`clnt_call` hace todo el trabajo: codifica el argumento con `xdr_numeros`, manda la petición
+con el número de procedimiento `SUMA`, espera hasta 25 s y decodifica la respuesta con
+`xdr_float`. El resultado queda en una variable `static`, así que la siguiente llamada lo
+sobreescribe (y no sirve con hilos).
+
+**`calculadora_svc.c`** — `main` del servidor y despachador:
+- `main`:
+  1. `pmap_unset(OPERACIONES_PROG, OPERACIONES_VERS)`: borra de rpcbind un registro viejo del
+     mismo programa (por si el servidor anterior no terminó bien).
+  2. `svcudp_create(RPC_ANYSOCK)`: abre un socket UDP en un puerto libre cualquiera.
+  3. `svc_register(transp, PROG, VERS, operaciones_prog_1, IPPROTO_UDP)`: le dice a rpcbind
+     "el programa 0x20000001 v1 está en este puerto" y que las peticiones las atienda
+     `operaciones_prog_1`.
+  4. Lo mismo con TCP (`svctcp_create`), así el cliente puede usar cualquiera de los dos.
+  5. `svc_run()`: ciclo infinito que espera peticiones y llama al despachador.
+- `operaciones_prog_1(rqstp, transp)` (despachador):
+  1. `switch (rqstp->rq_proc)`: según el número de procedimiento elige la función XDR del
+     argumento, la del resultado y la función a llamar (`suma_1_svc`, ...). `NULLPROC` (0)
+     responde vacío: sirve como "ping" (`rpcinfo -u`). Un número desconocido responde
+     `svcerr_noproc`.
+  2. `svc_getargs`: decodifica el argumento.
+  3. Llama la función (`suma_1_svc`).
+  4. `svc_sendreply`: codifica el resultado y lo manda.
+  5. `svc_freeargs`: libera la memoria del argumento.
+
+### Plantillas de `rpcgen -a` (no se usan)
+
+- `calculadora_server.c`: las 4 funciones `*_svc` con `/* insert server code here */`; como
+  el resultado es un `static float` sin asignar, siempre regresan 0.
+- `calculadora_client.c`: llama las 4 operaciones con argumentos sin inicializar y no imprime
+  nada.
+- `Makefile.calculadora`: compila justo esas dos plantillas (y usa `-lnsl`, que ya no trae RPC
+  en distribuciones actuales).
+
+### `Dockerfile`
+
+| Instrucción | Qué hace |
+|-------------|----------|
+| `FROM debian:bookworm-slim` | Sistema base pequeño |
+| `apt-get install gcc libc6-dev libtirpc-dev rpcsvc-proto rpcbind netbase ...` | Compilador; **libtirpc** (la biblioteca RPC, ya no viene en glibc); **rpcgen**; **rpcbind**; **netbase** (`/etc/services` y `/etc/protocols`, sin ellos rpcbind no abre el puerto 111); herramientas de red para depurar |
+| `COPY *.c *.h *.x ./` | Copia el código a `/rpc` |
+| `gcc -o servidor calculadora_svc.c calculadora_srv.c calculadora_xdr.c -I/usr/include/tirpc -ltirpc` | Servidor = `main`/despachador + operaciones + XDR |
+| `gcc -o cliente cliente.c calculadora_clnt.c calculadora_xdr.c ...` | Cliente = programa + stubs + XDR |
+| `CMD ["sh", "-c", "rpcbind && exec ./servidor"]` | Al arrancar: primero rpcbind (se va a segundo plano) y después el servidor como proceso principal |
+
+### `docker-compose.yml`
+
+- `name: rpc-calculadora`: nombre del proyecto (prefijo de imágenes y red).
+- `x-rpc: &rpc` ... `<<: *rpc`: bloque común (construir con el `Dockerfile` de la carpeta y
+  usar la red `rpc`) que se reutiliza en los 2 servicios.
+- `servidor`: usa el `CMD` del Dockerfile. `hostname: servidor` y el nombre del servicio hacen
+  que el cliente lo encuentre como `servidor` (DNS interno de Docker).
+- `cliente`: `command: ["sleep", "infinity"]` para que no haga nada y se quede encendido;
+  el cliente se ejecuta a mano con `docker exec`. `depends_on` lo arranca después del servidor.
+
 ## Ejecutar con Docker Compose
 
 Desde esta carpeta:

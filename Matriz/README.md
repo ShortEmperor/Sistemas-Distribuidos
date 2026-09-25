@@ -75,6 +75,104 @@ no puede pasar del tamaño del arreglo.
 - Cada servidor arranca `rpcbind` y después su programa. `stdbuf -oL` hace que sus `printf`
   aparezcan en `docker logs`.
 
+## Código explicado
+
+> Para lo básico de RPC (qué hacen `clnt_create`, los stubs, XDR, rpcbind, `svc_register`)
+> ver la sección "Código explicado" de [`../RPC/README.md`](../RPC/README.md).
+
+Las matrices se guardan en **arreglos de una dimensión**: el elemento `(i, j)` de una matriz
+`N × N` está en la posición `i*N + j`.
+
+### `cliente1.c` — cliente de 2 servidores (el que funciona)
+
+| Paso | Código | Qué hace |
+|------|--------|----------|
+| 1 | `#include "matriz.h"` y `#include "matriz2.h"` | Incluye los 2 programas RPC: tipos `matrices1`/`resultado1` (servidor 1) y `matrices2`/`resultado2` (servidor 2) |
+| 2 | `#define SERV 2`, `#define N 10` | 2 servidores, matriz de 10 × 10 (lo máximo que cabe en `A[100]`) |
+| 3 | `servidores[SERV] = {"localhost", "localhost"}` + `if (argc >= 3)` | Por defecto los 2 servidores en la misma máquina; con argumentos se usan otros hosts |
+| 4 | `programas[SERV] = {MATRIZ_PROG1, MATRIZ_PROG2}` | Número de programa de cada servidor |
+| 5 | `int C[1024]; memset(C, 0, ...)` | Matriz resultado completa, en el cliente |
+| 6 | 2 ciclos `m1.A[i*N + j] = 1`, `m1.B[...] = 1` | Llena A y B con puros 1 (la fórmula original quedó comentada) y las imprime |
+| 7 | `bloque = N / SERV` | Filas por servidor (5) |
+| 8 | `clnt_create(servidores[s], programas[s], MATRIZ_VERS, "udp")` | Conecta al servidor `s` por UDP |
+| 9 | `s == 0`: `m1.fila_inicio = 0; m1.fila_fin = bloque;` `res1 = multiplicar1_1(&m1, clnt)` | Pide al servidor 1 las filas 0..4. Imprime esas filas de `res1->C` y las copia en `C` |
+| 10 | `s == 1`: `m2.fila_inicio = bloque; m2.fila_fin = N;` `memcpy(m2.A, m1.A, ...)` `res2 = multiplicar2_1(&m2, clnt)` | Como el servidor 2 usa otro tipo (`matrices2`), se copian A y B de `m1` a `m2`. Pide las filas 5..9 y las copia en `C` |
+| 11 | `clnt_destroy(clnt)` | Cierra la conexión (dentro del ciclo) |
+| 12 | último ciclo | Imprime la matriz `C` completa |
+
+Las llamadas están dentro de un `for`: **primero el servidor 1 y cuando responde el servidor 2**.
+
+### `servidor1.c` / `servidor2.c` — los servidores
+
+```c
+resultado1 *multiplicar1_1_svc(matrices1 *m, struct svc_req *req) {
+    static resultado1 res;
+    n = m->n;
+    res.n = n; res.fila_inicio = m->fila_inicio; res.fila_fin = m->fila_fin;
+    for (i = m->fila_inicio; i < m->fila_fin; i++)      // solo sus filas
+        for (j = 0; j < n; j++) {                       // todas las columnas
+            res.C[i*n+j] = 0;
+            for (k = 0; k < n; k++)
+                res.C[i*n+j] += m->A[i*n+k] * m->B[k*n+j];   // fila i de A · columna j de B
+        }
+    printf("Servidor 1 calculó filas %d a %d\n", ...);
+    return &res;
+}
+```
+
+- Recibe A y B completas pero calcula solo las filas `[fila_inicio, fila_fin)`.
+- Regresa `res` completo (100 enteros) aunque solo haya llenado sus filas; el cliente solo
+  lee esas filas.
+- `servidor2.c` es idéntico con `matrices2`/`resultado2`/`multiplicar2_1_svc` y el mensaje
+  "Servidor 2".
+
+### Archivos generados (`matriz*.h`, `matriz*_clnt.c`, `matriz*_svc.c`, `matriz*_xdr.c`)
+
+- **`matriz.h` / `matriz2.h`**: `struct matrices1 { int n, fila_inicio, fila_fin; int A[100]; int B[100]; }`,
+  `struct resultado1 { ...; int C[100]; }`, `#define MATRIZ_PROG1 0x20000001` (y `MATRIZ_PROG2
+  0x20000002`), `MATRIZ_VERS 1`, `MULTIPLICAR1 1` y los prototipos.
+- **`matriz_xdr.c` / `matriz2_xdr.c`**: `xdr_matrices1` codifica `n`, `fila_inicio`,
+  `fila_fin` y después **los 100 elementos de A y los 100 de B** (`xdr_vector` con tamaño
+  fijo). Por eso siempre viaja todo el arreglo, aunque `N` sea menor. Tiene una ruta rápida
+  (`XDR_INLINE`) que escribe los enteros directo al buffer cuando hay espacio.
+- **`matriz_clnt.c` / `matriz2_clnt.c`**: stubs `multiplicar1_1` / `multiplicar2_1` con
+  `clnt_call`, timeout de 25 s y resultado `static`.
+- **`matriz_svc.c` / `matriz2_svc.c`**: `main` que registra `MATRIZ_PROG1` (o `PROG2`) por UDP
+  y TCP y el despachador `matriz_prog1_1` (o `matriz_prog2_1`).
+
+### Intentos anteriores (se dejan como evidencia)
+
+- **`cliente.c`**: `N 2`, se conecta a `127.0.0.1` en los **puertos fijos 5001 y 5002** con
+  `clntudp_create(&addr, ...)` (sin pasar por rpcbind) y llama `multiplicar_1`. Es de una
+  versión anterior con un solo tipo `matrices`; ya no compila.
+- **`clientem.c`**: `N 4`, parecido a `Practica2_matrices/clientem.c` pero con
+  `programas[] = {MATRIZ_PROG, MATRIZ_PROG2}`; usa los tipos `matrices`/`resultado`, que ya no
+  existen en los `.h`; no compila.
+- **`Servidor1/`, `Servidor2/`**: copias de cada servidor para compilarlo en su propia máquina.
+  Sus `.x` usan los tipos `matrices`/`resultado` con arreglos de **4** (N máximo 2).
+  `Servidor1/servidor.c` y `Servidor2/cliente1.c` están vacíos.
+- **`Pruebas/`**: mismos `cliente1.c`, `servidor1.c`, `servidor2.c` pero con `N 100` y
+  arreglos de 10000 (sus `.x` sí coinciden con sus `.h`). `matriz3.x` (+ sus archivos
+  generados) es un tercer programa `0x20000003` sin servidor; `matriz4.x` es un borrador de un
+  cuarto (`0x20000004`, con el nombre `MATRIZ_PROG1` repetido y el campo `filas_inicio`).
+- **`matriz.x` / `matriz2.x`** de esta carpeta: no coinciden con los `.h` que se usan
+  (ver errores).
+
+### `Dockerfile`
+
+| Instrucción | Qué hace |
+|-------------|----------|
+| `apt-get install gcc libc6-dev libtirpc-dev rpcsvc-proto rpcbind netbase ...` | Igual que en `RPC/` |
+| `COPY *.c *.h ./principal/` y `COPY Pruebas/*.c Pruebas/*.h ./pruebas/` | Dos copias del código, una por variante. **No** se corre rpcgen: se usan los `.h`/`.c` generados que ya estaban en el repo |
+| `for v in principal pruebas; do ... gcc ...; done` | Compila en cada variante `servidor1`, `servidor2` y `cliente1` |
+| `CMD ["sh", "-c", "rpcbind && exec stdbuf -oL ./$VARIANTE/servidor$SERVIDOR"]` | Arranca rpcbind y luego el servidor que indiquen las variables del compose. `stdbuf -oL` vacía `stdout` en cada línea para que los `printf` salgan en `docker logs` |
+
+### `docker-compose.yml`
+
+- `servidor1` y `servidor2`: misma imagen, `SERVIDOR=1` o `2`, y
+  `VARIANTE=${VARIANTE:-principal}` (toma la variable de la terminal, o `principal` si no hay).
+- `cliente`: `sleep infinity`; dentro están `./principal/cliente1` y `./pruebas/cliente1`.
+
 ## Ejecutar con Docker Compose
 
 Desde esta carpeta:

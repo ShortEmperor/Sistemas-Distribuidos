@@ -94,6 +94,101 @@ Todos los servidores tienen el **mismo programa**, igual que en `Practica2_matri
 
 En Docker se midieron ~770 MB en el cliente y ~510 MB en cada servidor durante el cálculo.
 
+## Código explicado
+
+> Para lo básico de RPC (qué hacen `clnt_create`, los stubs, XDR, rpcbind, `svc_register`)
+> ver la sección "Código explicado" de [`../../RPC/README.md`](../../RPC/README.md).
+
+### `rpcgen -M`: cómo cambian las funciones
+
+Con `-M` (*multithread*) rpcgen genera funciones que **no usan variables `static`**:
+
+| | Sin `-M` (versiones anteriores) | Con `-M` (esta versión) |
+|---|---|---|
+| Cliente | `resultado *multiplicar_1(peticion *, CLIENT *)` | `enum clnt_stat multiplicar_1(peticion *, respuesta *res, CLIENT *)` |
+| Servidor | `resultado *multiplicar_1_svc(peticion *, struct svc_req *)` | `bool_t multiplicar_1_svc(peticion *, respuesta *res, struct svc_req *)` |
+| Liberar resultado | — | el servidor debe definir `matriz_prog_1_freeresult` |
+
+El resultado se escribe en `*res`, que pone quien llama. Así cada hilo del cliente tiene su
+propia respuesta.
+
+Los arreglos `int A<>` se convierten en C en una estructura con largo y puntero:
+`struct { u_int A_len; int *A_val; } A;`. En XDR viajan como *largo + elementos*
+(`xdr_array`), así solo se manda lo que se usa.
+
+### `servidor.c`
+
+**`ahora()`**: hora actual en segundos (con microsegundos) usando `gettimeofday`; sirve para
+medir el cálculo.
+
+**`multiplicar_1_svc(peticion *p, respuesta *res, struct svc_req *req)`**:
+
+| Paso | Código | Qué hace |
+|------|--------|----------|
+| 1 | `filas = p->fila_fin - p->fila_inicio` | Cuántas filas le tocan |
+| 2 | `gethostname`, `printf("[%s] recibi filas ...")` | Registra la petición en su log |
+| 3 | `if (filas <= 0 \|\| p->A.A_len != filas*n \|\| p->B.B_len != n*n)` | Valida que A traiga exactamente sus filas y B sea `N×N`; si no, regresa `FALSE` (el cliente recibe un error) en lugar de leer fuera del arreglo |
+| 4 | `res->C.C_val = calloc(filas * n, sizeof(int))` | Reserva solo sus filas de C, en ceros |
+| 5 | `res->servidor = strdup(host)` | Guarda su nombre en la respuesta |
+| 6 | triple ciclo `i`, `k`, `j` | `C[i][j] += A[i][k] * B[k][j]`. El orden **i-k-j** recorre B y C fila por fila (memoria contigua), mucho más rápido que el orden i-j-k para matrices grandes. `A` local empieza en la fila 0: la fila `i` local es la fila `fila_inicio + i` real |
+| 7 | `res->segundos = ahora() - t0` | Tiempo de cálculo |
+| 8 | `return TRUE` | El código generado codifica `*res` y lo manda |
+
+**`matriz_prog_1_freeresult(...)`**: lo llama el código generado **después** de mandar la
+respuesta; `xdr_free` libera `C_val` y `servidor`. Sin esto cada petición dejaría 100 MB sin
+liberar (con N = 10000).
+
+### `cliente.c`
+
+**`trabajo`** (estructura): todo lo que necesita un hilo: host, `N`, rango de filas, punteros a
+las matrices completas `A`, `B`, `C`, y lo que regresa (si salió bien, tiempos, nombre del
+servidor).
+
+**`multiplicar_local(A, B, C, filas, n)`**: la misma multiplicación i-k-j, en el cliente; se
+usa para `--verificar`.
+
+**`imprimir(nombre, M, n)`**: imprime una matriz (solo cuando `N <= 10`).
+
+**`llamar_servidor(void *arg)`** — lo que hace **cada hilo**:
+
+| Paso | Código | Qué hace |
+|------|--------|----------|
+| 1 | `clnt_create(t->host, MATRIZ_PROG, MATRIZ_VERS, "tcp")` | Conexión **TCP** con su servidor |
+| 2 | `clnt_control(clnt, CLSET_TIMEOUT, &espera)` | Timeout de 1 hora (el de fábrica es 25 s y el cálculo tarda minutos) |
+| 3 | `p.A.A_len = filas * n; p.A.A_val = &t->A[fila_inicio * n]` | **No copia nada**: apunta a sus filas dentro de la A completa del cliente |
+| 4 | `p.B.B_len = n * n; p.B.B_val = t->B` | B completa |
+| 5 | `multiplicar_1(&p, &res, clnt) != RPC_SUCCESS` | Llamada RPC; se bloquea este hilo mientras el servidor calcula (los otros hilos siguen) |
+| 6 | `if (res.C.C_len == filas * n)` + `memcpy(&t->C[fila_inicio * n], res.C.C_val, ...)` | Revisa el tamaño y copia sus filas en su lugar de la C completa. Cada hilo escribe en filas distintas, así que no se pisan |
+| 7 | `xdr_free(xdr_respuesta, &res)` | Libera la memoria que reservó XDR al recibir |
+| 8 | `t->ok = 1`, tiempos | Resultado para el reporte final |
+
+**`main`**:
+
+| Paso | Qué hace |
+|------|----------|
+| 1 | Lee argumentos: el primer número es `N`, `--verificar` activa la verificación, lo demás son hosts |
+| 2 | `malloc` de A, B y C (`N × N` enteros cada una); si falta memoria se termina |
+| 3 | `srand(42)` + `rand() % 10`: llena A y B con enteros del 0 al 9, siempre los mismos |
+| 4 | Reparte filas: `n / k` a cada servidor y los primeros `n % k` reciben una extra |
+| 5 | `pthread_create` para cada servidor con filas → **las K llamadas empiezan al mismo tiempo** |
+| 6 | `pthread_join` de todos: espera a que terminen |
+| 7 | Imprime por servidor: filas, tiempo de cálculo y tiempo total con red; si alguno falló termina con error |
+| 8 | Con `--verificar`: `multiplicar_local` de toda la matriz, `memcmp` contra `C` y speedup = tiempo local / tiempo distribuido |
+
+### `Dockerfile`
+
+| Instrucción | Qué hace |
+|-------------|----------|
+| `rpcgen -M matriz.x` | Genera `matriz.h`, `matriz_xdr.c`, `matriz_clnt.c` y `matriz_svc.c` (con `main`) en versión para hilos |
+| `gcc -O2 -o servidor servidor.c matriz_svc.c matriz_xdr.c ...` | Servidor; `-O2` optimiza el ciclo de la multiplicación |
+| `gcc -O2 -o cliente cliente.c matriz_clnt.c matriz_xdr.c ... -lpthread` | Cliente con hilos |
+| `CMD ["sh", "-c", "rpcbind && exec stdbuf -oL ./servidor"]` | rpcbind + servidor, con salida línea por línea para `docker logs` |
+
+### `docker-compose.yml`
+
+4 servicios `servidor1` … `servidor4` iguales (misma imagen, `CMD` del Dockerfile) y un
+`cliente` con `sleep infinity` para usarlo con `docker exec`.
+
 ## Ejecutar con Docker Compose
 
 Desde esta carpeta:

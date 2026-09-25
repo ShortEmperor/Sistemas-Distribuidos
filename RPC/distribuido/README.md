@@ -70,6 +70,75 @@ a la máquina que le corresponde.
 - Cada servidor recibe su operación con la variable de entorno `OPERACION` del compose.
 - Los contenedores se llaman igual que su operación, así el cliente los encuentra por nombre.
 
+## Código explicado
+
+> Para lo básico de RPC (qué hacen `clnt_create`, los stubs, XDR, rpcbind, `svc_register`)
+> ver la sección "Código explicado" de [`../README.md`](../README.md). Aquí solo lo que cambia.
+
+### `operaciones.x`
+
+- `struct numeros { float a; float b; }` se define **una sola vez**.
+- 4 bloques `program`, cada uno con su número (`0x20000011` ... `0x20000014`), una versión
+  (`= 1`) y un solo procedimiento (`= 1`). Para RPC son 4 servicios independientes.
+
+### `servidor.c`
+
+**Funciones de las operaciones** (`suma_1_svc`, `resta_1_svc`, `multiplicacion_1_svc`,
+`division_1_svc`): igual que en la calculadora original (resultado en variable `static`), pero
+cada una llama a `registro(...)`.
+
+**`registro(op, n, r)`**: imprime `[hostname] operacion(a, b) = r` y hace `fflush(stdout)`
+para que el mensaje salga inmediatamente en `docker logs`.
+
+**`main(argc, argv)`**:
+
+| Paso | Código | Qué hace |
+|------|--------|----------|
+| 1 | `strcmp(argv[1], "suma")` ... | Según el argumento elige el número de programa (`SUMA_PROG`...) y su **despachador** (`suma_prog_1`...). Esas funciones las genera `rpcgen -m` |
+| 2 | `gethostname(host, ...)` | Guarda el nombre de la máquina para los mensajes |
+| 3 | `pmap_unset(prog, 1)` | Borra un registro viejo del mismo programa en rpcbind |
+| 4 | `svcudp_create` + `svc_register(..., prog, 1, despachador, IPPROTO_UDP)` | Abre un socket UDP y registra **solo este programa** en rpcbind |
+| 5 | `svctcp_create` + `svc_register(..., IPPROTO_TCP)` | Lo mismo por TCP |
+| 6 | `svc_run()` | Atiende peticiones para siempre |
+
+Aunque el ejecutable contiene las 4 funciones, la máquina solo **registra** una: si alguien pide
+otra operación, rpcbind no la conoce y responde `Program not registered`.
+
+### `cliente.c`
+
+| Paso | Código | Qué hace |
+|------|--------|----------|
+| 1 | `if (argc < 5)` | Pide las 4 máquinas: suma, resta, multiplicación y división |
+| 2 | 4 × `clnt_create(argv[i], X_PROG, X_VERS, "udp")` | Una conexión a cada máquina, cada una al programa de su operación. Si cualquiera falla se termina |
+| 3 | `scanf` | Lee `a` y `b` |
+| 4 | `suma_1(&nums, clnt_suma)`, `resta_1(&nums, clnt_resta)`, ... | Cada operación se manda por **su** conexión, o sea a **su** máquina. Revisa `NULL` en cada una |
+| 5 | `printf("Suma (%s): ...", argv[1], ...)` | Muestra el resultado y qué máquina lo calculó |
+| 6 | `if (nums.b == 0)` | Aviso de división entre 0 |
+| 7 | 4 × `clnt_destroy` | Cierra las 4 conexiones |
+
+### `Dockerfile`
+
+La diferencia con el de la calculadora original es que los archivos de RPC se generan al
+construir, uno por uno:
+
+| Comando | Genera | Contiene |
+|---------|--------|----------|
+| `rpcgen -h operaciones.x -o operaciones.h` | encabezado | tipos, números de programa, prototipos |
+| `rpcgen -c operaciones.x -o operaciones_xdr.c` | XDR | `xdr_numeros` |
+| `rpcgen -l operaciones.x -o operaciones_clnt.c` | stubs del cliente | `suma_1`, `resta_1`, ... |
+| `rpcgen -m operaciones.x -o operaciones_svc.c` | despachadores **sin `main`** | `suma_prog_1`, `resta_prog_1`, ... |
+
+`CMD ["sh", "-c", "rpcbind && exec ./servidor $OPERACION"]`: arranca rpcbind y luego el
+servidor con la operación que le toca a ese contenedor.
+
+### `docker-compose.yml`
+
+- 4 servicios servidores (`suma`, `resta`, `multiplicacion`, `division`) con la misma imagen;
+  cada uno recibe su operación con `environment: [OPERACION=...]`.
+- El nombre de cada servicio es también su hostname, por eso el cliente se llama con
+  `./cliente suma resta multiplicacion division`.
+- `cliente`: `sleep infinity` para usarlo con `docker exec`.
+
 ## Ejecutar con Docker Compose
 
 Desde esta carpeta:

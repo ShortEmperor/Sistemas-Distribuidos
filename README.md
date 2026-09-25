@@ -14,8 +14,9 @@ Prácticas de la materia de Sistemas Distribuidos: **RPC** (Sun RPC / rpcgen, en
 | [`MPI HolaMundo/`](MPI%20HolaMundo/) | Hola Mundo con MPI y envío de mensajes entre 2 computadoras | Python | 2 nodos |
 | [`MPI Matriz/`](MPI%20Matriz/) | Matrices con MPI, **10,000 × 10,000 entre 4 computadoras** | C | 4 nodos |
 
-Cada carpeta tiene su `README.md` con cómo funciona, el diseño, cómo levantarla, cómo
-probarla y los errores que se encontraron.
+Cada carpeta tiene su `README.md` con cómo funciona, el diseño, el **código explicado**
+(archivo por archivo y función por función, incluyendo `Dockerfile` y `docker-compose.yml`),
+cómo levantarla, cómo probarla y los errores que se encontraron.
 
 ## Requisitos
 

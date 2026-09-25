@@ -68,6 +68,79 @@ al construirse.
   `printf` salgan en `docker logs`).
 - El cliente se queda encendido para usarlo con `docker exec`.
 
+## Código explicado
+
+> Para lo básico de RPC (qué hacen `clnt_create`, los stubs, XDR, rpcbind, `svc_register`)
+> ver la sección "Código explicado" de [`../RPC/README.md`](../RPC/README.md).
+
+Las matrices se guardan en **arreglos de una dimensión**: el elemento `(i, j)` de una matriz
+`N × N` está en la posición `i*N + j`.
+
+### `matriz.x`
+
+- `struct matrices`: lo que se manda al servidor — `n`, el rango de filas `[fila_inicio,
+  fila_fin)` y las matrices `A[10000]` y `B[10000]`.
+- `struct resultado`: lo que regresa — `n`, el rango de filas y `C[10000]`.
+- Un programa `MATRIZ_PROG` (`0x20000001`) con el procedimiento `MULTIPLICAR`. Los 4
+  servidores corren este mismo programa.
+
+### `clientem.c`
+
+| Paso | Código | Qué hace |
+|------|--------|----------|
+| 1 | `#define N 4`, `#define SERV 4` | Matriz de 4 × 4 entre 4 servidores |
+| 2 | `servidores[SERV] = {"192.168.229.48", ...}` + `if (argc > SERV)` | IPs del laboratorio por defecto; si se pasan 4 argumentos se usan esos hosts |
+| 3 | `m.A[i*N + j] = i + j + 1` y `m.B[i*N + j] = (i+1)*(j+1)` | Llena A y B y las imprime |
+| 4 | `bloque = N / SERV` | Filas por servidor (1) |
+| 5 | `m.fila_inicio = s * bloque; m.fila_fin = (s + 1) * bloque;` | Rango del servidor `s`; el último (`s == SERV - 1`) llega hasta `N` para no perder filas |
+| 6 | `clnt_create(servidores[s], MATRIZ_PROG, MATRIZ_VERS, "tcp")` | Conecta al servidor `s` |
+| 7 | `res = multiplicar_1(&m, clnt)` | Manda A y B completas + su rango y espera sus filas de C |
+| 8 | ciclo `for (i = m.fila_inicio; i < m.fila_fin; i++)` | Imprime las filas que calculó ese servidor |
+| 9 | `clnt_destroy(clnt)` | Cierra y pasa al siguiente servidor |
+
+El cliente no junta una matriz C completa: imprime el resultado parcial de cada servidor, en
+orden, y juntos forman C.
+
+### `servidor.c`
+
+```c
+resultado *multiplicar_1_svc(matrices *m, struct svc_req *req) {
+    static resultado res;                       // static: se lee después de regresar
+    int n = m->n;
+    res.n = n; res.fila_inicio = m->fila_inicio; res.fila_fin = m->fila_fin;
+    for (i = m->fila_inicio; i < m->fila_fin; i++)   // solo sus filas
+        for (j = 0; j < n; j++) {
+            res.C[i*n + j] = 0;
+            for (k = 0; k < n; k++)
+                res.C[i*n + j] += m->A[i*n + k] * m->B[k*n + j];   // fila i de A · columna j de B
+        }
+    printf("Servidor calculó filas %d a %d\n", ...);
+    return &res;
+}
+```
+
+### Archivos generados (solo existen dentro de la imagen)
+
+`rpcgen matriz.x` genera `matriz.h` (tipos y constantes), `matriz_xdr.c` (`xdr_matrices` y
+`xdr_resultado`: mandan `n`, el rango y **los 10000 elementos de cada arreglo**, siempre),
+`matriz_clnt.c` (stub `multiplicar_1`) y `matriz_svc.c` (`main` que registra el programa y
+despachador).
+
+### `Dockerfile`
+
+| Instrucción | Qué hace |
+|-------------|----------|
+| `apt-get install gcc libc6-dev libtirpc-dev rpcsvc-proto rpcbind netbase ...` | Compilador, biblioteca RPC, rpcgen, rpcbind y `/etc/services` |
+| `COPY matriz.x servidor.c clientem.c ./` | Solo los 3 archivos fuente |
+| `rpcgen matriz.x` | Genera los archivos de RPC |
+| `gcc -o servidor ...` / `gcc -o cliente clientem.c ...` | Compila servidor y cliente |
+| `CMD ["sh", "-c", "rpcbind && exec stdbuf -oL ./servidor"]` | rpcbind + servidor, con salida línea por línea para `docker logs` |
+
+### `docker-compose.yml`
+
+4 servicios `servidor1` … `servidor4` iguales y un `cliente` con `sleep infinity` para usarlo
+con `docker exec`. Todos en la misma red, se encuentran por nombre.
+
 ## Ejecutar con Docker Compose
 
 Desde esta carpeta:
