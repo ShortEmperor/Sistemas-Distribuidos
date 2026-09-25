@@ -1,7 +1,8 @@
 # Multiplicación de matrices con MPI
 
 Práctica de MPI en C (OpenMPI): multiplicar `C = A × B` repartiendo las filas entre
-**4 computadoras**. Llega al tamaño de la práctica: **10,000 × 10,000 en 153 s** en Docker.
+**4 computadoras**. Llega al tamaño de la práctica: **10,000 × 10,000 en ~143 s** en Docker, e imprime las
+matrices A, B y C completas.
 
 ## Cómo funciona
 
@@ -15,7 +16,11 @@ y junta el resultado.
    `Scatterv` y no `Scatter`).
 4. Cada proceso calcula sus filas de `C` (`C_local = A_local × B`) y mide cuánto tardó.
 5. **`MPI_Gatherv`**: el proceso 0 junta las filas de todos en `C`.
-6. Con `--verificar`, el proceso 0 recalcula todo solo, compara y muestra el speedup.
+6. **`MPI_Gather`**: el proceso 0 junta el tiempo de cálculo y el nombre de máquina de cada
+   proceso, y reporta qué hizo cada uno.
+7. Con `--verificar`, el proceso 0 recalcula todo solo y compara.
+8. El proceso 0 **imprime las matrices A, B y C completas** (para cualquier `N`) y al final el
+   resumen de tiempos.
 
 ```
  proceso 0 (nodo1)                     procesos 1..3 (nodo2..nodo4)
@@ -50,6 +55,11 @@ y junta el resultado.
 | Multiplicación en orden `i-k-j` | Recorre `B` y `C` por filas (mejor uso de la caché) |
 | `int` | Con valores del 0 al 9, el máximo de una celda es 81 × 10000 = 810,000: cabe en `int` |
 | Se valida `malloc` | Con `N` grande puede faltar memoria; se aborta con mensaje en lugar de fallar después |
+| **Solo el proceso 0 imprime** (los demás le mandan su tiempo y host con `MPI_Gather`) | `mpirun` reenvía la salida de cada nodo cuando puede: si cada proceso imprimiera, sus líneas podrían quedar **en medio de las matrices** (se probó: aparecían después de C aun con `MPI_Barrier`) |
+| Las matrices se imprimen **después** de medir el tiempo | Imprimir 1 GB de texto no es parte del cálculo distribuido |
+| El resumen de tiempos va **al final** | Con matrices grandes, es lo único que se ve sin desplazarse |
+| Ancho de columna según el número más grande | Las columnas quedan alineadas aunque C tenga números de 6 cifras |
+| Cada fila se arma en un buffer y se escribe con `fwrite` | Un `printf` por número es mucho más lento con 300 millones de números |
 
 **Memoria con N = 10,000** (`int` = 4 bytes → 400 MB por matriz)
 
@@ -82,7 +92,13 @@ que necesitan las funciones de MPI.
 
 ### `matriz_mpi.c`
 
-**`imprimir(nombre, M, N)`**: imprime una matriz (solo se usa con `N <= 10`).
+**`imprimir(nombre, M, N)`**: imprime la matriz completa.
+
+1. Busca el número más grande y cuenta sus cifras → `ancho` de columna.
+2. Reserva un buffer para una fila: `N × (ancho + 1)` caracteres + salto de línea.
+3. Por cada fila: `sprintf(p, "%*d ", ancho, valor)` para cada número (el `*` toma el ancho
+   de la variable), y `fwrite` de la fila completa.
+4. `fflush(stdout)` para que salga todo antes de seguir.
 
 **`multiplicar(A, B, C, filas, N)`**: `C[filas × N] = A[filas × N] · B[N × N]`.
 
@@ -105,7 +121,7 @@ es varias veces más rápido.
 | Paso | Código | Qué hace |
 |------|--------|----------|
 | 1 | `MPI_Init`, `MPI_Comm_rank`, `MPI_Comm_size`, `MPI_Get_processor_name` | Inicia MPI; cada proceso sabe su número (`rank`), cuántos son (`size`) y en qué máquina está |
-| 2 | ciclo sobre `argv` | `N` (por defecto 1000) y `--verificar`. Si `N` no es válido, el proceso 0 muestra el uso y todos terminan |
+| 2 | ciclo sobre `argv` | `N` (por defecto 1000), `--verificar` y `--no-imprimir`. Si `N` no es válido, el proceso 0 muestra el uso y todos terminan |
 | 3 | `filas[p] = N / size + (p < N % size ? 1 : 0)` | Filas de cada proceso; los primeros `N % size` reciben una extra |
 | 4 | `inicio[p]`, `conteos[p] = filas[p] * N`, `desplazamientos[p] = inicio[p] * N` | Dónde empieza cada bloque y cuántos enteros lleva: es lo que piden `Scatterv`/`Gatherv` |
 | 5 | `malloc` de `B`, `A_local`, `C_local` | **Todos** necesitan B completa y espacio para sus filas. Si falta memoria: `MPI_Abort` (termina a todos) |
@@ -114,10 +130,13 @@ es varias veces más rápido.
 | 8 | `MPI_Bcast(B, N*N, MPI_INT, 0, MPI_COMM_WORLD)` | El proceso 0 manda B a todos; en los demás se llena su `B` |
 | 9 | `MPI_Scatterv(A, conteos, desplazamientos, MPI_INT, A_local, conteos[rank], MPI_INT, 0, ...)` | El proceso 0 corta A en bloques de filas y le manda a cada proceso el suyo (a sí mismo también) |
 | 10 | `multiplicar(A_local, B, C_local, filas[rank], N)` | Cada proceso calcula sus filas de C, midiendo el tiempo |
-| 11 | `printf("Proceso %d en %s: filas ...")` | Cada proceso reporta qué hizo y en qué máquina |
-| 12 | `MPI_Gatherv(C_local, conteos[rank], MPI_INT, C, conteos, desplazamientos, MPI_INT, 0, ...)` | Lo contrario de `Scatterv`: el proceso 0 recibe las filas de todos y las acomoda en `C` |
-| 13 | `if (rank == 0)`: tiempo total, imprimir C, `--verificar` | Con `--verificar` recalcula `A · B` completo en un solo proceso, compara con `memcmp` y muestra el speedup |
-| 14 | `free` + `MPI_Finalize` | Libera memoria y cierra MPI |
+| 11 | `MPI_Gatherv(C_local, conteos[rank], MPI_INT, C, conteos, desplazamientos, MPI_INT, 0, ...)` | Lo contrario de `Scatterv`: el proceso 0 recibe las filas de todos y las acomoda en `C`. Aquí termina la medición (`t_total`) |
+| 12 | `MPI_Gather(&t_calc, ...)` y `MPI_Gather(host, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, ...)` | El proceso 0 recibe el tiempo de cálculo y el nombre de máquina de cada proceso |
+| 13 | `if (rank == 0)`: ciclo `printf("Proceso %d en %s: filas ...")` | Reporta, en orden, qué filas hizo cada proceso, en qué máquina y cuánto tardó |
+| 14 | `if (verificar)` | Recalcula `A · B` completo en un solo proceso y compara con `memcmp` |
+| 15 | `imprimir("A", ...)`, `imprimir("B", ...)`, `imprimir("C", ...)` | Las 3 matrices completas (se salta con `--no-imprimir`) |
+| 16 | `printf("Tiempo total ...")` | Resumen al final: tiempo distribuido y, con `--verificar`, `CORRECTO`/`ERROR` y speedup |
+| 17 | `free` + `MPI_Finalize` | Libera memoria y cierra MPI |
 
 **Por qué `Scatterv`/`Gatherv` y no `Scatter`/`Gather`**: las versiones sin `v` exigen que
 todos los bloques sean del mismo tamaño; con `v` cada proceso puede recibir un número distinto
@@ -175,55 +194,97 @@ Los comandos siempre se ejecutan como usuario `mpi` (`-u mpi`).
 
 ## Pruebas
 
-Uso: `mpirun -np <procesos> --hostfile hosts ./matriz_mpi [N] [--verificar]`
+Uso: `mpirun -np <procesos> --hostfile hosts ./matriz_mpi [N] [--verificar] [--no-imprimir]`
 
 - `N`: tamaño de la matriz (por defecto 1000).
+- Siempre se imprimen **A, B y C completas**, sea cual sea `N`.
 - `--verificar`: el proceso 0 recalcula todo solo, compara e imprime el speedup
   (no usar con `N` muy grande: tarda lo mismo que una sola máquina).
-- Con `N <= 10` se imprimen A, B y C.
+- `--no-imprimir`: no imprime las matrices (para medir tiempos sin generar el texto).
 
-**Matriz pequeña (se imprime todo)**
+El orden de la salida es siempre: qué hizo cada proceso → matriz A → matriz B → matriz C →
+resumen de tiempos.
+
+**Tamaño de la salida**: cada número ocupa sus cifras + un espacio.
+
+| N | Tamaño de la salida | Tiempo en imprimir |
+|---|--------------------|--------------------|
+| 2,000 | 39 MB | ~2 s |
+| 10,000 | **1.1 GB** | ~40 s |
+
+Con `N` grande **no conviene imprimir en la terminal** (tardaría muchísimo); mejor mandarlo a un
+archivo dentro del contenedor y copiarlo:
+
+```bash
+docker exec -u mpi mpi-matriz-nodo1 sh -c "mpirun -np 4 --hostfile hosts ./matriz_mpi 10000 > salida.txt"
+docker cp mpi-matriz-nodo1:/home/mpi/salida.txt .
+```
+
+> En PowerShell 5.1 evitar `docker exec ... > salida.txt` directo: `>` guarda el archivo en
+> UTF-16 y lo hace el doble de grande. Con `sh -c "... > salida.txt"` la redirección ocurre
+> dentro del contenedor.
+
+**Matriz pequeña**
 
 ```bash
 docker exec -it -u mpi mpi-matriz-nodo1 mpirun -np 4 --hostfile hosts ./matriz_mpi 4 --verificar
 ```
 ```
+Multiplicando matrices de 4x4 con 4 procesos
 Proceso 0 en nodo1: filas 0 a 0 (0.000 s de calculo)
 Proceso 1 en nodo2: filas 1 a 1 (0.000 s de calculo)
 Proceso 2 en nodo3: filas 2 a 2 (0.000 s de calculo)
 Proceso 3 en nodo4: filas 3 a 3 (0.000 s de calculo)
+Matriz A (4x4):
+6 1 2 1
+5 4 7 6
+2 8 7 9
+7 9 1 3
+Matriz B (4x4):
+0 1 8 0
+3 3 4 2
+8 9 2 3
+9 4 6 7
+Matriz C (4x4):
+ 28  31  62  15
+122 104 106  71
+161 125 116 100
+ 62  55 112  42
+Tiempo total (envio + calculo + recoleccion): 0.003 s
+Verificacion contra version secuencial: CORRECTO
+Tiempo secuencial: 0.000 s  ->  speedup: 0.00x
+```
+
+**Speedup (N = 2000, sin imprimir las matrices)**
+
+```bash
+docker exec -it -u mpi mpi-matriz-nodo1 mpirun -np 4 --hostfile hosts ./matriz_mpi 2000 --verificar --no-imprimir
+```
+```
+Proceso 0 en nodo1: filas 0 a 499 (1.446 s de calculo)
 ...
-Matriz C:
-  28   31   62   15
- 122  104  106   71
- 161  125  116  100
-  62   55  112   42
+Tiempo total (envio + calculo + recoleccion): 1.624 s
 Verificacion contra version secuencial: CORRECTO
+Tiempo secuencial: 6.365 s  ->  speedup: 3.92x
 ```
 
-**Speedup (N = 1500)**
+**Tamaño de la práctica (N = 10,000)** — unos 3 minutos (2:20 de cálculo + ~40 s imprimiendo)
 
 ```bash
-docker exec -it -u mpi mpi-matriz-nodo1 mpirun -np 4 --hostfile hosts ./matriz_mpi 1500 --verificar
+docker exec -u mpi mpi-matriz-nodo1 sh -c "mpirun -np 4 --hostfile hosts ./matriz_mpi 10000 > salida.txt"
+docker exec -u mpi mpi-matriz-nodo1 sh -c "head -5 salida.txt; tail -1 salida.txt"
 ```
 ```
-Tiempo total (envio + calculo + recoleccion): 0.752 s
-Verificacion contra version secuencial: CORRECTO
-Tiempo secuencial: 2.252 s  ->  speedup: 3.00x
+Multiplicando matrices de 10000x10000 con 4 procesos
+Proceso 0 en nodo1: filas 0 a 2499 (139.529 s de calculo)
+Proceso 1 en nodo2: filas 2500 a 4999 (138.880 s de calculo)
+Proceso 2 en nodo3: filas 5000 a 7499 (138.502 s de calculo)
+Proceso 3 en nodo4: filas 7500 a 9999 (139.797 s de calculo)
+Tiempo total (envio + calculo + recoleccion): 142.681 s
 ```
 
-**Tamaño de la práctica (N = 10,000)** — tarda unos 2-3 minutos
-
-```bash
-docker exec -it -u mpi mpi-matriz-nodo1 mpirun -np 4 --hostfile hosts ./matriz_mpi 10000
-```
-```
-Proceso 0 en nodo1: filas 0 a 2499 (149.464 s de calculo)
-Proceso 1 en nodo2: filas 2500 a 4999 (150.335 s de calculo)
-Proceso 2 en nodo3: filas 5000 a 7499 (147.673 s de calculo)
-Proceso 3 en nodo4: filas 7500 a 9999 (148.421 s de calculo)
-Tiempo total (envio + calculo + recoleccion): 153.034 s
-```
+El archivo mide 1.1 GB y tiene 30,009 líneas: 5 de encabezado, 3 matrices de
+10,000 filas × 10,000 columnas (más su título) y el resumen.
 
 Mientras corre se puede ver que los 4 nodos trabajan al mismo tiempo: `docker stats`.
 
