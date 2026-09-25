@@ -13,13 +13,15 @@
 extern "C" {
 #endif
 
+#define MAX_N 1500
+#define MAX_ELEM 2250000
 
 struct matrices1 {
 	int n;
 	int fila_inicio;
 	int fila_fin;
-	int A[100];
-	int B[100];
+	int A[MAX_ELEM];
+	int B[MAX_ELEM];
 };
 typedef struct matrices1 matrices1;
 
@@ -27,7 +29,7 @@ struct resultado1 {
 	int n;
 	int fila_inicio;
 	int fila_fin;
-	int C[100];
+	int C[MAX_ELEM];
 };
 typedef struct resultado1 resultado1;
 

@@ -13,7 +13,7 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 	int i;
 
 	if (xdrs->x_op == XDR_ENCODE) {
-		buf = XDR_INLINE (xdrs, (3 +  100  + 100 )* BYTES_PER_XDR_UNIT);
+		buf = XDR_INLINE (xdrs, (3 +  MAX_ELEM  + MAX_ELEM )* BYTES_PER_XDR_UNIT);
 		if (buf == NULL) {
 			 if (!xdr_int (xdrs, &objp->n))
 				 return FALSE;
@@ -21,10 +21,10 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 				 return FALSE;
 			 if (!xdr_int (xdrs, &objp->fila_fin))
 				 return FALSE;
-			 if (!xdr_vector (xdrs, (char *)objp->A, 100,
+			 if (!xdr_vector (xdrs, (char *)objp->A, MAX_ELEM,
 				sizeof (int), (xdrproc_t) xdr_int))
 				 return FALSE;
-			 if (!xdr_vector (xdrs, (char *)objp->B, 100,
+			 if (!xdr_vector (xdrs, (char *)objp->B, MAX_ELEM,
 				sizeof (int), (xdrproc_t) xdr_int))
 				 return FALSE;
 		} else {
@@ -35,7 +35,7 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 				register int *genp;
 
 				for (i = 0, genp = objp->A;
-					i < 100; ++i) {
+					i < MAX_ELEM; ++i) {
 					IXDR_PUT_LONG(buf, *genp++);
 				}
 			}
@@ -43,14 +43,14 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 				register int *genp;
 
 				for (i = 0, genp = objp->B;
-					i < 100; ++i) {
+					i < MAX_ELEM; ++i) {
 					IXDR_PUT_LONG(buf, *genp++);
 				}
 			}
 		}
 		return TRUE;
 	} else if (xdrs->x_op == XDR_DECODE) {
-		buf = XDR_INLINE (xdrs, (3 +  100  + 100 )* BYTES_PER_XDR_UNIT);
+		buf = XDR_INLINE (xdrs, (3 +  MAX_ELEM  + MAX_ELEM )* BYTES_PER_XDR_UNIT);
 		if (buf == NULL) {
 			 if (!xdr_int (xdrs, &objp->n))
 				 return FALSE;
@@ -58,10 +58,10 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 				 return FALSE;
 			 if (!xdr_int (xdrs, &objp->fila_fin))
 				 return FALSE;
-			 if (!xdr_vector (xdrs, (char *)objp->A, 100,
+			 if (!xdr_vector (xdrs, (char *)objp->A, MAX_ELEM,
 				sizeof (int), (xdrproc_t) xdr_int))
 				 return FALSE;
-			 if (!xdr_vector (xdrs, (char *)objp->B, 100,
+			 if (!xdr_vector (xdrs, (char *)objp->B, MAX_ELEM,
 				sizeof (int), (xdrproc_t) xdr_int))
 				 return FALSE;
 		} else {
@@ -72,7 +72,7 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 				register int *genp;
 
 				for (i = 0, genp = objp->A;
-					i < 100; ++i) {
+					i < MAX_ELEM; ++i) {
 					*genp++ = IXDR_GET_LONG(buf);
 				}
 			}
@@ -80,7 +80,7 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 				register int *genp;
 
 				for (i = 0, genp = objp->B;
-					i < 100; ++i) {
+					i < MAX_ELEM; ++i) {
 					*genp++ = IXDR_GET_LONG(buf);
 				}
 			}
@@ -94,10 +94,10 @@ xdr_matrices1 (XDR *xdrs, matrices1 *objp)
 		 return FALSE;
 	 if (!xdr_int (xdrs, &objp->fila_fin))
 		 return FALSE;
-	 if (!xdr_vector (xdrs, (char *)objp->A, 100,
+	 if (!xdr_vector (xdrs, (char *)objp->A, MAX_ELEM,
 		sizeof (int), (xdrproc_t) xdr_int))
 		 return FALSE;
-	 if (!xdr_vector (xdrs, (char *)objp->B, 100,
+	 if (!xdr_vector (xdrs, (char *)objp->B, MAX_ELEM,
 		sizeof (int), (xdrproc_t) xdr_int))
 		 return FALSE;
 	return TRUE;
@@ -111,7 +111,7 @@ xdr_resultado1 (XDR *xdrs, resultado1 *objp)
 	int i;
 
 	if (xdrs->x_op == XDR_ENCODE) {
-		buf = XDR_INLINE (xdrs, (3 +  100 )* BYTES_PER_XDR_UNIT);
+		buf = XDR_INLINE (xdrs, (3 +  MAX_ELEM )* BYTES_PER_XDR_UNIT);
 		if (buf == NULL) {
 			 if (!xdr_int (xdrs, &objp->n))
 				 return FALSE;
@@ -119,7 +119,7 @@ xdr_resultado1 (XDR *xdrs, resultado1 *objp)
 				 return FALSE;
 			 if (!xdr_int (xdrs, &objp->fila_fin))
 				 return FALSE;
-			 if (!xdr_vector (xdrs, (char *)objp->C, 100,
+			 if (!xdr_vector (xdrs, (char *)objp->C, MAX_ELEM,
 				sizeof (int), (xdrproc_t) xdr_int))
 				 return FALSE;
 		} else {
@@ -130,14 +130,14 @@ xdr_resultado1 (XDR *xdrs, resultado1 *objp)
 				register int *genp;
 
 				for (i = 0, genp = objp->C;
-					i < 100; ++i) {
+					i < MAX_ELEM; ++i) {
 					IXDR_PUT_LONG(buf, *genp++);
 				}
 			}
 		}
 		return TRUE;
 	} else if (xdrs->x_op == XDR_DECODE) {
-		buf = XDR_INLINE (xdrs, (3 +  100 )* BYTES_PER_XDR_UNIT);
+		buf = XDR_INLINE (xdrs, (3 +  MAX_ELEM )* BYTES_PER_XDR_UNIT);
 		if (buf == NULL) {
 			 if (!xdr_int (xdrs, &objp->n))
 				 return FALSE;
@@ -145,7 +145,7 @@ xdr_resultado1 (XDR *xdrs, resultado1 *objp)
 				 return FALSE;
 			 if (!xdr_int (xdrs, &objp->fila_fin))
 				 return FALSE;
-			 if (!xdr_vector (xdrs, (char *)objp->C, 100,
+			 if (!xdr_vector (xdrs, (char *)objp->C, MAX_ELEM,
 				sizeof (int), (xdrproc_t) xdr_int))
 				 return FALSE;
 		} else {
@@ -156,7 +156,7 @@ xdr_resultado1 (XDR *xdrs, resultado1 *objp)
 				register int *genp;
 
 				for (i = 0, genp = objp->C;
-					i < 100; ++i) {
+					i < MAX_ELEM; ++i) {
 					*genp++ = IXDR_GET_LONG(buf);
 				}
 			}
@@ -170,7 +170,7 @@ xdr_resultado1 (XDR *xdrs, resultado1 *objp)
 		 return FALSE;
 	 if (!xdr_int (xdrs, &objp->fila_fin))
 		 return FALSE;
-	 if (!xdr_vector (xdrs, (char *)objp->C, 100,
+	 if (!xdr_vector (xdrs, (char *)objp->C, MAX_ELEM,
 		sizeof (int), (xdrproc_t) xdr_int))
 		 return FALSE;
 	return TRUE;

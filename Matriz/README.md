@@ -40,22 +40,33 @@ Las llamadas son **una después de otra**: mientras un servidor calcula, el otro
 **Estructuras (de `matriz.h` / `matriz2.h`, generados con rpcgen)**
 
 ```c
-struct matrices1 { int n; int fila_inicio; int fila_fin; int A[100]; int B[100]; };
-struct resultado1 { int n; int fila_inicio; int fila_fin; int C[100]; };
+#define MAX_N 1500
+#define MAX_ELEM 2250000      /* MAX_N * MAX_N */
+struct matrices1 { int n; int fila_inicio; int fila_fin; int A[MAX_ELEM]; int B[MAX_ELEM]; };
+struct resultado1 { int n; int fila_inicio; int fila_fin; int C[MAX_ELEM]; };
 // matrices2 / resultado2: iguales, para el servidor 2
 ```
 
-Los arreglos son de **tamaño fijo**: se mandan siempre completos aunque se use menos, y `N×N`
-no puede pasar del tamaño del arreglo.
+Los arreglos son de **tamaño fijo**: `N×N` no puede pasar del tamaño del arreglo (N máximo
+1500), y **se mandan siempre completos** aunque se use menos: cada llamada lleva A y B de
+2,250,000 enteros (18 MB) y regresa C (9 MB), sea `N` 10 o 1500.
+
+Por ese tamaño:
+- Se usa **TCP** (UDP no puede mandar mensajes tan grandes).
+- En el cliente las estructuras son `static` (18 MB no caben en la pila de 8 MB).
+- El servidor se arranca con **`ulimit -s unlimited`**: el código que genera rpcgen
+  (`matriz_svc.c`) decodifica los argumentos en una variable local de 18 MB.
+- Se compila con **`-O2`**: sin optimizar, N = 1500 tarda ~15 s por servidor, cerca del
+  timeout de 25 s de los stubs; con `-O2`, ~3 s.
 
 **Contenido de la carpeta** (todo se dejó como evidencia de los intentos)
 
 | Archivo / carpeta | Qué es |
 |-------------------|--------|
-| `cliente1.c` | **Cliente que funciona** (2 servidores, `N` por argumento, de 1 a 10) |
+| `cliente1.c` | **Cliente que funciona** (2 servidores, `N` por argumento, de 1 a 1500) |
 | `servidor1.c`, `servidor2.c` | **Servidores que funcionan** |
-| `matriz.h`, `matriz_*.c` / `matriz2.h`, `matriz2_*.c` | Generados por rpcgen para PROG1 / PROG2 (arreglos de 100) |
-| `matriz.x`, `matriz2.x` | Definiciones RPC; **no coinciden** con los `.h` que se usan (ver errores) |
+| `matriz.h`, `matriz_*.c` / `matriz2.h`, `matriz2_*.c` | Generados por rpcgen desde `matriz.x` / `matriz2.x` para PROG1 / PROG2 (arreglos de 2,250,000) |
+| `matriz.x`, `matriz2.x` | Definiciones RPC de los 2 servidores (antes no coincidían con los `.h`, ver errores) |
 | `cliente.c` | Intento anterior (puertos fijos 5001/5002 con `clntudp_create`); no compila |
 | `clientem.c` | Intento anterior (un solo tipo `matrices`); no compila |
 | `servidor.c`, `cliente1.x` | Vacíos |
@@ -68,7 +79,7 @@ no puede pasar del tamaño del arreglo.
 **Docker**
 
 - La imagen compila **2 variantes** usando los `.h`/`.c` generados que ya estaban en el repo:
-  - `principal`: archivos de esta carpeta (arreglos de 100 → `N` máximo 10).
+  - `principal`: archivos de esta carpeta (arreglos de 2,250,000 → `N` máximo 1500).
   - `pruebas`: carpeta `Pruebas/` (arreglos de 10000 → `N` máximo 100).
 - La variable `VARIANTE` elige qué servidores arrancan (por defecto `principal`). Cliente y
   servidores **deben ser de la misma variante** (los tamaños de los arreglos tienen que coincidir).
@@ -91,12 +102,12 @@ Las matrices se guardan en **arreglos de una dimensión**: el elemento `(i, j)` 
 | 2 | `#define SERV 2`, `int N = N_DEFECTO` (10) | 2 servidores; `N` es una variable para poder cambiarla con un argumento |
 | 3 | `servidores[SERV] = {"localhost", "localhost"}` + `if (argc >= 3)` | Por defecto los 2 servidores en la misma máquina; con argumentos se usan otros hosts |
 | 4 | `programas[SERV] = {MATRIZ_PROG1, MATRIZ_PROG2}` | Número de programa de cada servidor |
-| 5 | `int C[1024]; memset(C, 0, ...)` | Matriz resultado completa, en el cliente |
-| 6 | `elementos = sizeof(m1.A) / sizeof(int)` (y lo mismo con `m2.A` y `C`, se queda el menor); `while ((n_max+1)*(n_max+1) <= elementos) n_max++` | Calcula el `N` máximo **a partir del tamaño real de los arreglos** de los `.h`: con `A[100]` da 10, con `A[10000]` da 100 |
+| 5 | `static matrices1 m1; static matrices2 m2; static int C[MAX_ELEM];` | Lo que se manda a cada servidor y la matriz resultado completa. `static` porque miden 18 MB y 9 MB y no caben en la pila |
+| 6 | `elementos = sizeof(m1.A) / sizeof(int)` (y lo mismo con `m2.A` y `C`, se queda el menor); `while ((n_max+1)*(n_max+1) <= elementos) n_max++` | Calcula el `N` máximo **a partir del tamaño real de los arreglos** de los `.h`: con `A[2250000]` da 1500, con `A[10000]` (Pruebas) da 100 |
 | 7 | `if (argc >= 4) N = atoi(argv[3])` + `if (N < 1 \|\| N > n_max)` | `N` opcional como tercer argumento. Si no cabe en los arreglos se rechaza con un mensaje, en lugar de desbordarlos (lo que colgaba al cliente con `N 32`) |
 | 8 | 2 ciclos `m1.A[i*N + j] = 1`, `m1.B[...] = 1` | Llena A y B con puros 1 (la fórmula original quedó comentada) y las imprime |
 | 9 | `bloque = N / SERV` | Filas por servidor (con N = 10: 5) |
-| 10 | `clnt_create(servidores[s], programas[s], MATRIZ_VERS, "udp")` | Conecta al servidor `s` por UDP |
+| 10 | `clnt_create(servidores[s], programas[s], MATRIZ_VERS, "tcp")` | Conecta al servidor `s` por TCP |
 | 11 | `s == 0`: `m1.fila_inicio = 0; m1.fila_fin = bloque;` `res1 = multiplicar1_1(&m1, clnt)` | Pide al servidor 1 las filas `0` a `bloque - 1`. Imprime esas filas de `res1->C` y las copia en `C` |
 | 12 | `s == 1`: `m2.fila_inicio = bloque; m2.fila_fin = N;` `memcpy(m2.A, m1.A, ...)` `res2 = multiplicar2_1(&m2, clnt)` | Como el servidor 2 usa otro tipo (`matrices2`), se copian A y B de `m1` a `m2`. Pide las filas `bloque` a `N - 1` (con N impar le toca una más) y las copia en `C` |
 | 13 | `clnt_destroy(clnt)` | Cierra la conexión (dentro del ciclo) |
@@ -130,17 +141,23 @@ resultado1 *multiplicar1_1_svc(matrices1 *m, struct svc_req *req) {
 
 ### Archivos generados (`matriz*.h`, `matriz*_clnt.c`, `matriz*_svc.c`, `matriz*_xdr.c`)
 
-- **`matriz.h` / `matriz2.h`**: `struct matrices1 { int n, fila_inicio, fila_fin; int A[100]; int B[100]; }`,
-  `struct resultado1 { ...; int C[100]; }`, `#define MATRIZ_PROG1 0x20000001` (y `MATRIZ_PROG2
-  0x20000002`), `MATRIZ_VERS 1`, `MULTIPLICAR1 1` y los prototipos.
+- **`matriz.x` / `matriz2.x`**: `const MAX_N = 1500; const MAX_ELEM = 2250000;`, las
+  estructuras `matrices1`/`resultado1` (o `2`) con arreglos `[MAX_ELEM]` y el programa
+  `MATRIZ_PROG1` (`0x20000001`) o `MATRIZ_PROG2` (`0x20000002`).
+- **`matriz.h` / `matriz2.h`**: `#define MAX_N 1500`, `#define MAX_ELEM 2250000`,
+  `struct matrices1 { int n, fila_inicio, fila_fin; int A[MAX_ELEM]; int B[MAX_ELEM]; }`,
+  `struct resultado1 { ...; int C[MAX_ELEM]; }`, `#define MATRIZ_PROG1 0x20000001` (y
+  `MATRIZ_PROG2 0x20000002`), `MATRIZ_VERS 1`, `MULTIPLICAR1 1` y los prototipos.
 - **`matriz_xdr.c` / `matriz2_xdr.c`**: `xdr_matrices1` codifica `n`, `fila_inicio`,
-  `fila_fin` y después **los 100 elementos de A y los 100 de B** (`xdr_vector` con tamaño
+  `fila_fin` y después **los 2,250,000 elementos de A y los de B** (`xdr_vector` con tamaño
   fijo). Por eso siempre viaja todo el arreglo, aunque `N` sea menor. Tiene una ruta rápida
   (`XDR_INLINE`) que escribe los enteros directo al buffer cuando hay espacio.
 - **`matriz_clnt.c` / `matriz2_clnt.c`**: stubs `multiplicar1_1` / `multiplicar2_1` con
   `clnt_call`, timeout de 25 s y resultado `static`.
 - **`matriz_svc.c` / `matriz2_svc.c`**: `main` que registra `MATRIZ_PROG1` (o `PROG2`) por UDP
-  y TCP y el despachador `matriz_prog1_1` (o `matriz_prog2_1`).
+  y TCP y el despachador `matriz_prog1_1` (o `matriz_prog2_1`). El despachador decodifica
+  el argumento en una variable **local** (`union argument`), de 18 MB: por eso el servidor
+  necesita `ulimit -s unlimited`.
 
 ### Intentos anteriores (se dejan como evidencia)
 
@@ -157,8 +174,9 @@ resultado1 *multiplicar1_1_svc(matrices1 *m, struct svc_req *req) {
   y arreglos de 10000 (sus `.x` sí coinciden con sus `.h`). `matriz3.x` (+ sus archivos
   generados) es un tercer programa `0x20000003` sin servidor; `matriz4.x` es un borrador de un
   cuarto (`0x20000004`, con el nombre `MATRIZ_PROG1` repetido y el campo `filas_inicio`).
-- **`matriz.x` / `matriz2.x`** de esta carpeta: no coinciden con los `.h` que se usan
-  (ver errores).
+- Las versiones anteriores de **`matriz.x` / `matriz2.x`** no coincidían con los `.h`
+  (ver errores); se corrigieron y los `.h`/`.c` se regeneraron con rpcgen. Las versiones
+  viejas quedan en el historial de git.
 
 ### `Dockerfile`
 
@@ -166,8 +184,8 @@ resultado1 *multiplicar1_1_svc(matrices1 *m, struct svc_req *req) {
 |-------------|----------|
 | `apt-get install gcc libc6-dev libtirpc-dev rpcsvc-proto rpcbind netbase ...` | Igual que en `RPC/` |
 | `COPY *.c *.h ./principal/` y `COPY Pruebas/*.c Pruebas/*.h ./pruebas/` | Dos copias del código, una por variante. **No** se corre rpcgen: se usan los `.h`/`.c` generados que ya estaban en el repo |
-| `for v in principal pruebas; do ... gcc ...; done` | Compila en cada variante `servidor1`, `servidor2` y `cliente1` |
-| `CMD ["sh", "-c", "rpcbind && exec stdbuf -oL ./$VARIANTE/servidor$SERVIDOR"]` | Arranca rpcbind y luego el servidor que indiquen las variables del compose. `stdbuf -oL` vacía `stdout` en cada línea para que los `printf` salgan en `docker logs` |
+| `for v in principal pruebas; do ... gcc -O2 ...; done` | Compila en cada variante `servidor1`, `servidor2` y `cliente1`, optimizado |
+| `CMD ["sh", "-c", "ulimit -s unlimited && rpcbind && exec stdbuf -oL ./$VARIANTE/servidor$SERVIDOR"]` | Quita el límite de la pila (el servidor decodifica 18 MB en una variable local), arranca rpcbind y luego el servidor que indiquen las variables del compose. `stdbuf -oL` vacía `stdout` en cada línea para que los `printf` salgan en `docker logs` |
 
 ### `docker-compose.yml`
 
@@ -196,15 +214,15 @@ Uso: `./cliente1 [host_servidor1 host_servidor2 [N]]`
 
 - Sin argumentos: los 2 servidores en `localhost` y el `N` por defecto.
 - `N` es opcional y va **después** de los 2 hosts. Tiene que caber en los arreglos de los `.h`:
-  de 1 a **10** en `principal` (arreglos de 100) y de 1 a **100** en `pruebas` (arreglos de
-  10000). Si no cabe, el cliente lo rechaza.
+  de 1 a **1500** en `principal` y de 1 a **100** en `pruebas`. Si no cabe, el cliente lo
+  rechaza.
 - Siempre se imprimen **completas** A, B, las filas de cada servidor y C.
 - A y B son puros 1, así que **todos los valores de C deben ser `N`**.
 
 **Variante principal**
 
 ```bash
-docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2       # N = 10
+docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2       # N = 10 (por defecto)
 docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2 3     # N = 3
 ```
 ```
@@ -233,13 +251,23 @@ Matriz resultado C completa:
 
 Con `N` impar el servidor 2 hace una fila más (`bloque = N / 2` se redondea hacia abajo).
 
+**N = 1500** (el máximo) — la salida mide 31 MB, mejor mandarla a un archivo:
+
+```bash
+docker exec rpc-matriz-cliente sh -c "./principal/cliente1 servidor1 servidor2 1500 > salida.txt"
+docker cp rpc-matriz-cliente:/matriz/salida.txt .
+```
+
+Tarda ~5 s (~3 s cada servidor, uno después de otro). `salida.txt` tiene A, B, las 750 filas
+de cada servidor y C completas: 1500 filas × 1500 columnas, todos los valores de C = `1500`.
+
 **`N` que no cabe en los arreglos**
 
 ```bash
-docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2 11
+docker exec -it rpc-matriz-cliente ./principal/cliente1 servidor1 servidor2 1501
 ```
 ```
-N debe estar entre 1 y 10: los arreglos de matriz.h/matriz2.h son de 100 elementos
+N debe estar entre 1 y 1500: los arreglos de matriz.h/matriz2.h son de 2250000 elementos
 ```
 
 **Qué calculó cada servidor**
@@ -273,20 +301,22 @@ Se ejecutó todo como estaba (en una sola máquina con `localhost`, como se prob
 | 2 | `Pruebas/cliente1.c` con `N 100`: A y B de 100×100 son 80 KB y **no caben en un mensaje UDP**. Esto es lo que no dejaba crecer la matriz | `Error en Servidor 1: RPC: Can't encode arguments` | `"udp"` → `"tcp"` |
 | 3 | Los dos `cliente1.c` tenían `"localhost"` fijo: solo funcionaban con los servidores en la misma máquina | — | `./cliente1 host1 host2` (sin argumentos sigue usando `localhost`) |
 | 4 | `cliente.c` y `clientem.c` no compilan con los `.h` actuales | `error: unknown type name 'matrices'; did you mean 'matrices1'?` | Se dejan como están (intentos anteriores) |
-| 5 | Los `.x` no coinciden con los `.h`: `matriz.x` dice `A[4]` y define `MATRIZ_PROG` dos veces; `matriz2.x` dice `A[1024]` | Con `rpcgen matriz.x`: `unknown type name 'matrices1'`, `redefinition of 'matriz_prog_1'` | Docker usa los `.h`/`.c` generados del repo |
+| 5 | Los `.x` no coinciden con los `.h`: `matriz.x` dice `A[4]` y define `MATRIZ_PROG` dos veces; `matriz2.x` dice `A[1024]` | Con `rpcgen matriz.x`: `unknown type name 'matrices1'`, `redefinition of 'matriz_prog_1'` | Se reescribieron los `.x` con los tipos que usa el código y se regeneraron los `.h`/`.c` (`matriz_svc.c` y `matriz_clnt.c` salieron idénticos a los originales) |
 | 6 | `servidor.c`, `cliente1.x` y `Servidor2/cliente1.c` están vacíos | — | Se dejan |
 | 7 | En `readme.txt` decía `-ltirp` | Error de enlace | `-ltirpc` |
 | 8 | Con 10,000×10,000 este diseño no podía funcionar: 400 MB por matriz en arreglos fijos, cada servidor recibe A y B completas aunque solo calcule la mitad, y los servidores trabajan uno por uno | — | Ver [`distribuido/`](distribuido/) |
+| 9 | Para llegar a N = 1500 los arreglos pasan a 2,250,000 enteros (18 MB por llamada): el código generado por rpcgen decodifica los argumentos en una variable local y no cabe en la pila de 8 MB | Servidor: `Segmentation fault` (exit 139) al recibir cualquier petición, aun con N = 10; el cliente muere sin mensaje (SIGPIPE, exit 141) | `ulimit -s unlimited` antes de arrancar el servidor; en el cliente las estructuras son `static` |
+| 10 | Compilado sin optimizar, N = 1500 tarda ~15 s por servidor, cerca del timeout de 25 s de los stubs | 31 s en total | `gcc -O2`: ~3 s por servidor |
 
 ## En máquinas reales (sin Docker)
 
 ```bash
 sudo systemctl start rpcbind
-gcc -o servidor1 servidor1.c matriz_svc.c matriz_xdr.c -I/usr/include/tirpc -ltirpc
-gcc -o servidor2 servidor2.c matriz2_svc.c matriz2_xdr.c -I/usr/include/tirpc -ltirpc
-gcc -o cliente1 cliente1.c matriz_clnt.c matriz2_clnt.c matriz_xdr.c matriz2_xdr.c -I/usr/include/tirpc -ltirpc
+gcc -O2 -o servidor1 servidor1.c matriz_svc.c matriz_xdr.c -I/usr/include/tirpc -ltirpc
+gcc -O2 -o servidor2 servidor2.c matriz2_svc.c matriz2_xdr.c -I/usr/include/tirpc -ltirpc
+gcc -O2 -o cliente1 cliente1.c matriz_clnt.c matriz2_clnt.c matriz_xdr.c matriz2_xdr.c -I/usr/include/tirpc -ltirpc
 
-./servidor1                  # máquina 1
-./servidor2                  # máquina 2
-./cliente1 <ip1> <ip2>       # máquina cliente
+ulimit -s unlimited; ./servidor1        # máquina 1 (sin el ulimit: Segmentation fault)
+ulimit -s unlimited; ./servidor2        # máquina 2
+./cliente1 <ip1> <ip2> [N]              # máquina cliente
 ```

@@ -15,8 +15,10 @@ int main(int argc, char *argv[])
     int N = N_DEFECTO;
     CLIENT *clnt;
     //matriz para cada servidor
-    matrices1 m1; 
-    matrices2 m2;
+    // static: con arreglos de 1500x1500 cada estructura mide 18 MB y no cabe
+    // en la pila (8 MB por defecto)
+    static matrices1 m1;
+    static matrices2 m2;
     
     //punteros del resultado c/u
     resultado1 *res1;
@@ -30,11 +32,11 @@ int main(int argc, char *argv[])
         servidores[1] = argv[2];
     }
     int programas[SERV] = {MATRIZ_PROG1, MATRIZ_PROG2};
-    int C[1024];
+    static int C[MAX_ELEM];
     memset(C, 0, sizeof(C));
 
     // N maximo: el mas grande con N*N <= elementos del arreglo mas chico (A de matriz.h,
-    // A de matriz2.h o C). Con A[100] da 10.
+    // A de matriz2.h o C). Con A[MAX_ELEM] = A[2250000] da 1500.
     int elementos = sizeof(m1.A) / sizeof(int);
     if(sizeof(m2.A) / sizeof(int) < elementos) elementos = sizeof(m2.A) / sizeof(int);
     if(sizeof(C) / sizeof(int) < elementos) elementos = sizeof(C) / sizeof(int);
@@ -75,7 +77,8 @@ int main(int argc, char *argv[])
 
     for(s = 0; s < SERV; s++)
     {
-        clnt = clnt_create(servidores[s], programas[s], MATRIZ_VERS, "udp");
+        // antes "udp": con arreglos de 2250000 cada llamada manda 18 MB, no cabe en UDP
+        clnt = clnt_create(servidores[s], programas[s], MATRIZ_VERS, "tcp");
         if(clnt == NULL) {
             clnt_pcreateerror(servidores[s]);
             exit(1);
