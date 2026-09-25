@@ -1,10 +1,11 @@
 /*
  * cliente.c - multiplicacion de matrices distribuida con RPC
  *
- *   ./cliente N [--verificar] servidor1 servidor2 ... servidorK
+ *   ./cliente N [--verificar] [--no-imprimir] servidor1 servidor2 ... servidorK
  *
  * Reparte las filas de A entre los K servidores, les manda B completa y
  * llama a todos AL MISMO TIEMPO (un hilo por servidor), luego junta C.
+ * Al final imprime las matrices A, B y C completas (cualquier N).
  */
 
 #include <stdio.h>
@@ -42,15 +43,37 @@ static void multiplicar_local(int *A, int *B, int *C, int filas, int n)
         }
 }
 
+/* imprime la matriz completa; el ancho de columna se ajusta al numero mas grande */
 static void imprimir(const char *nombre, int *M, int n)
 {
-    int i, j;
-    printf("Matriz %s:\n", nombre);
-    for (i = 0; i < n; i++) {
-        for (j = 0; j < n; j++)
-            printf("%4d ", M[i * n + j]);
-        printf("\n");
+    int i, j, ancho = 1, max = 0;
+    size_t t, total = (size_t)n * n;
+    char *linea, *p;
+
+    for (t = 0; t < total; t++)
+        if (M[t] > max)
+            max = M[t];
+    for (i = max; i >= 10; i /= 10)
+        ancho++;
+
+    /* cada fila se arma en un buffer y se escribe de una vez (mucho mas rapido
+     * que un printf por numero cuando N es grande) */
+    linea = malloc((size_t)n * (ancho + 1) + 2);
+    if (linea == NULL) {
+        fprintf(stderr, "Sin memoria para imprimir la matriz %s\n", nombre);
+        return;
     }
+
+    printf("Matriz %s (%dx%d):\n", nombre, n, n);
+    for (i = 0; i < n; i++) {
+        p = linea;
+        for (j = 0; j < n; j++)
+            p += sprintf(p, "%*d ", ancho, M[(size_t)i * n + j]);
+        *p++ = '\n';
+        fwrite(linea, 1, p - linea, stdout);
+    }
+    fflush(stdout);
+    free(linea);
 }
 
 static void *llamar_servidor(void *arg)
@@ -104,7 +127,8 @@ static void *llamar_servidor(void *arg)
 
 int main(int argc, char *argv[])
 {
-    int n = 0, verificar = 0, k = 0, s, i;
+    int n = 0, verificar = 0, imprimir_matrices = 1, correcto = 0, k = 0, s, i;
+    double t_local = 0;
     char **hosts = malloc(argc * sizeof(char *));
     int *A, *B, *C;
     trabajo *trabajos;
@@ -115,13 +139,15 @@ int main(int argc, char *argv[])
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--verificar") == 0)
             verificar = 1;
+        else if (strcmp(argv[i], "--no-imprimir") == 0)
+            imprimir_matrices = 0;
         else if (n == 0 && atoi(argv[i]) > 0)
             n = atoi(argv[i]);
         else
             hosts[k++] = argv[i];
     }
     if (n <= 0 || k == 0) {
-        printf("Uso: %s N [--verificar] servidor1 servidor2 ... servidorK\n", argv[0]);
+        printf("Uso: %s N [--verificar] [--no-imprimir] servidor1 servidor2 ... servidorK\n", argv[0]);
         return 1;
     }
 
@@ -139,10 +165,7 @@ int main(int argc, char *argv[])
         B[i] = rand() % 10;
     }
     printf("Multiplicando matrices de %dx%d con %d servidores\n", n, n, k);
-    if (n <= 10) {
-        imprimir("A", A, n);
-        imprimir("B", B, n);
-    }
+    fflush(stdout);
 
     /* repartir filas: si N no es divisible entre K, los primeros llevan una extra */
     trabajos = calloc(k, sizeof(trabajo));
@@ -183,25 +206,34 @@ int main(int argc, char *argv[])
             fallas++;
         }
     }
-    printf("Tiempo total (envio + calculo + recoleccion): %.3f s\n", t_total);
     if (fallas > 0) {
+        printf("Tiempo total (envio + calculo + recoleccion): %.3f s\n", t_total);
         printf("%d servidor(es) fallaron, el resultado esta incompleto\n", fallas);
         return 1;
     }
 
-    if (n <= 10)
-        imprimir("C", C, n);
-
     if (verificar) {
         int *C_local = malloc((size_t)n * n * sizeof(int));
-        double t_local = ahora();
+        t_local = ahora();
         multiplicar_local(A, B, C_local, n, n);
         t_local = ahora() - t_local;
-        printf("Verificacion contra version local: %s\n",
-               memcmp(C, C_local, (size_t)n * n * sizeof(int)) == 0 ? "CORRECTO" : "ERROR");
+        correcto = memcmp(C, C_local, (size_t)n * n * sizeof(int)) == 0;
+        free(C_local);
+    }
+
+    /* matrices completas (fuera de la medicion de tiempo) */
+    if (imprimir_matrices) {
+        imprimir("A", A, n);
+        imprimir("B", B, n);
+        imprimir("C", C, n);
+    }
+
+    /* el resumen al final, para verlo aunque las matrices sean enormes */
+    printf("Tiempo total (envio + calculo + recoleccion): %.3f s\n", t_total);
+    if (verificar) {
+        printf("Verificacion contra version local: %s\n", correcto ? "CORRECTO" : "ERROR");
         printf("Tiempo local (1 maquina): %.3f s  ->  speedup: %.2fx\n",
                t_local, t_local / t_total);
-        free(C_local);
     }
 
     free(A); free(B); free(C); free(trabajos); free(hilos); free(hosts);
