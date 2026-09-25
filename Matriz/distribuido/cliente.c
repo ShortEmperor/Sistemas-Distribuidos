@@ -159,10 +159,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    srand(42);
+    /* A y B de puros 1: cada C[i][j] = suma de N productos 1*1 = N,
+     * asi el resultado es predecible y facil de revisar */
     for (i = 0; i < n * n; i++) {
-        A[i] = rand() % 10;
-        B[i] = rand() % 10;
+        A[i] = 1;
+        B[i] = 1;
     }
     printf("Multiplicando matrices de %dx%d con %d servidores\n", n, n, k);
     fflush(stdout);
@@ -221,6 +222,12 @@ int main(int argc, char *argv[])
         free(C_local);
     }
 
+    /* con A y B de puros 1, todos los valores de C deben ser N */
+    long distintos = 0;
+    for (i = 0; i < n * n; i++)
+        if (C[i] != n)
+            distintos++;
+
     /* matrices completas (fuera de la medicion de tiempo) */
     if (imprimir_matrices) {
         imprimir("A", A, n);
@@ -230,6 +237,10 @@ int main(int argc, char *argv[])
 
     /* el resumen al final, para verlo aunque las matrices sean enormes */
     printf("Tiempo total (envio + calculo + recoleccion): %.3f s\n", t_total);
+    if (distintos == 0)
+        printf("Todos los valores de C son %d (= N): CORRECTO\n", n);
+    else
+        printf("ERROR: %ld valores de C no son %d (= N)\n", distintos, n);
     if (verificar) {
         printf("Verificacion contra version local: %s\n", correcto ? "CORRECTO" : "ERROR");
         printf("Tiempo local (1 maquina): %.3f s  ->  speedup: %.2fx\n",

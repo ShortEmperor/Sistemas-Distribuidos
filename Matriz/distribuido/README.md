@@ -4,12 +4,13 @@ Lo que pedía la práctica: multiplicar matrices de **10,000 × 10,000 entre 4 c
 usando RPC. Un cliente reparte las filas entre 4 servidores, **los 4 calculan al mismo
 tiempo** y el cliente junta el resultado.
 
-Resultado en Docker (4 servidores en la misma laptop): **10,000 × 10,000 en 140 s**.
+Resultado en Docker (4 servidores en la misma laptop): **10,000 × 10,000 en ~140-150 s**,
+con A y B de puros 1 → todos los valores de C son 10000.
 
 ## Cómo funciona
 
-1. El cliente genera `A` y `B` (enteros del 0 al 9, semilla fija para que siempre salgan
-   iguales).
+1. El cliente llena `A` y `B` con **puros 1**. Así el resultado es predecible: cada
+   `C[i][j]` es la suma de `N` productos `1 × 1`, o sea **todos los valores de C son `N`**.
 2. Reparte las filas de `A` entre los `K` servidores. Si `N` no es divisible entre `K`, los
    primeros servidores reciben una fila extra.
 3. Crea **un hilo por servidor**; cada hilo:
@@ -76,7 +77,8 @@ Todos los servidores tienen el **mismo programa**, igual que en `Practica2_matri
 | **`rpcgen -M`** | Los stubs normales usan una variable `static` para el resultado y no sirven con hilos. Con `-M` el resultado va en un argumento y se libera con `xdr_free` |
 | Timeout de 1 hora (`clnt_control`) | El timeout por defecto es de 25 s y el cálculo de 10000×10000 tarda minutos |
 | Las matrices se imprimen **después** de medir el tiempo, y el resumen va **al final** | Imprimir no es parte del cálculo distribuido; con matrices grandes el resumen es lo único que se ve sin desplazarse |
-| Ancho de columna según el número más grande y una escritura (`fwrite`) por fila | Columnas alineadas aunque C tenga números de 6 cifras, y rápido aunque sean millones de números |
+| Ancho de columna según el número más grande y una escritura (`fwrite`) por fila | Columnas alineadas aunque C tenga números de más cifras que A y B, y rápido aunque sean millones de números |
+| A y B de **puros 1** | Resultado predecible (C = puros `N`), fácil de revisar a simple vista o con un script; el cliente lo comprueba en cada ejecución |
 | Multiplicación en orden `i-k-j` | Recorre `B` y `C` por filas (mejor uso de la caché) |
 | El servidor valida los tamaños recibidos | Si `A` o `B` no miden lo esperado, rechaza la petición en lugar de leer fuera del arreglo |
 
@@ -174,14 +176,14 @@ y la escribe de una vez con `fwrite`.
 |------|----------|
 | 1 | Lee argumentos: el primer número es `N`, `--verificar` activa la verificación, `--no-imprimir` evita imprimir las matrices, lo demás son hosts |
 | 2 | `malloc` de A, B y C (`N × N` enteros cada una); si falta memoria se termina |
-| 3 | `srand(42)` + `rand() % 10`: llena A y B con enteros del 0 al 9, siempre los mismos |
+| 3 | Llena A y B con puros 1 (`A[i] = 1; B[i] = 1;`) |
 | 4 | Reparte filas: `n / k` a cada servidor y los primeros `n % k` reciben una extra |
 | 5 | `pthread_create` para cada servidor con filas → **las K llamadas empiezan al mismo tiempo** |
 | 6 | `pthread_join` de todos: espera a que terminen |
 | 7 | Imprime por servidor: filas, tiempo de cálculo y tiempo total con red; si alguno falló termina con error |
-| 8 | Con `--verificar`: `multiplicar_local` de toda la matriz y `memcmp` contra `C` |
+| 8 | Con `--verificar`: `multiplicar_local` de toda la matriz y `memcmp` contra `C`. Siempre: cuenta cuántos valores de `C` no son `N` (`distintos`) |
 | 9 | `imprimir("A")`, `imprimir("B")`, `imprimir("C")`: las 3 matrices completas (salvo con `--no-imprimir`) |
-| 10 | Resumen: tiempo total y, con `--verificar`, `CORRECTO`/`ERROR` y speedup = tiempo local / tiempo distribuido |
+| 10 | Resumen: tiempo total, `Todos los valores de C son N: CORRECTO` (o cuántos no lo son) y, con `--verificar`, `CORRECTO`/`ERROR` contra la versión local y speedup = tiempo local / tiempo distribuido |
 
 ### `Dockerfile`
 
@@ -225,7 +227,7 @@ Uso: `./cliente N [--verificar] [--no-imprimir] servidor1 servidor2 ... servidor
 El orden de la salida es siempre: qué hizo cada servidor → matriz A → matriz B → matriz C →
 resumen de tiempos.
 
-**Tamaño de la salida**: con `N = 300` son 793 KB; con `N = 1500`, unos 22 MB; con
+**Tamaño de la salida**: con `N = 300` son 705 KB; con `N = 1500`, unos 20 MB; con
 `N = 10,000`, más de 1 GB. Para `N` grande conviene mandarlo a un archivo y copiarlo:
 
 ```bash
@@ -249,21 +251,22 @@ servidor2 (servidor2): filas 1 a 1, calculo 0.000 s, total con red 0.008 s
 servidor3 (servidor3): filas 2 a 2, calculo 0.000 s, total con red 0.008 s
 servidor4 (servidor4): filas 3 a 3, calculo 0.000 s, total con red 0.006 s
 Matriz A (4x4):
-6 1 2 1
-5 4 7 6
-2 8 7 9
-7 9 1 3
+1 1 1 1
+1 1 1 1
+1 1 1 1
+1 1 1 1
 Matriz B (4x4):
-0 1 8 0
-3 3 4 2
-8 9 2 3
-9 4 6 7
+1 1 1 1
+1 1 1 1
+1 1 1 1
+1 1 1 1
 Matriz C (4x4):
- 28  31  62  15
-122 104 106  71
-161 125 116 100
- 62  55 112  42
-Tiempo total (envio + calculo + recoleccion): 0.010 s
+4 4 4 4
+4 4 4 4
+4 4 4 4
+4 4 4 4
+Tiempo total (envio + calculo + recoleccion): 0.007 s
+Todos los valores de C son 4 (= N): CORRECTO
 Verificacion contra version local: CORRECTO
 Tiempo local (1 maquina): 0.000 s  ->  speedup: 0.00x
 ```
@@ -274,13 +277,14 @@ Tiempo local (1 maquina): 0.000 s  ->  speedup: 0.00x
 docker exec -it rpc-matdist-cliente ./cliente 1500 --verificar --no-imprimir servidor1 servidor2 servidor3 servidor4
 ```
 ```
-servidor1 (servidor1): filas 0 a 374, calculo 0.665 s, total con red 0.708 s
-servidor2 (servidor2): filas 375 a 749, calculo 0.639 s, total con red 0.694 s
-servidor3 (servidor3): filas 750 a 1124, calculo 0.685 s, total con red 0.738 s
-servidor4 (servidor4): filas 1125 a 1499, calculo 0.676 s, total con red 0.720 s
-Tiempo total (envio + calculo + recoleccion): 0.743 s
+servidor1 (servidor1): filas 0 a 374, calculo 0.684 s, total con red 0.738 s
+servidor2 (servidor2): filas 375 a 749, calculo 0.701 s, total con red 0.761 s
+servidor3 (servidor3): filas 750 a 1124, calculo 0.688 s, total con red 0.748 s
+servidor4 (servidor4): filas 1125 a 1499, calculo 0.664 s, total con red 0.726 s
+Tiempo total (envio + calculo + recoleccion): 0.762 s
+Todos los valores de C son 1500 (= N): CORRECTO
 Verificacion contra version local: CORRECTO
-Tiempo local (1 maquina): 2.195 s  ->  speedup: 2.95x
+Tiempo local (1 maquina): 2.207 s  ->  speedup: 2.89x
 ```
 
 **Tamaño de la práctica (N = 10,000)** — unos 3 minutos; la salida con las matrices pasa de
@@ -288,15 +292,16 @@ Tiempo local (1 maquina): 2.195 s  ->  speedup: 2.95x
 
 ```bash
 docker exec rpc-matdist-cliente sh -c "./cliente 10000 servidor1 servidor2 servidor3 servidor4 > salida.txt"
-docker exec rpc-matdist-cliente sh -c "head -5 salida.txt; tail -1 salida.txt"
+docker exec rpc-matdist-cliente sh -c "head -5 salida.txt; tail -2 salida.txt"
 ```
 ```
 Multiplicando matrices de 10000x10000 con 4 servidores
-servidor1 (servidor1): filas 0 a 2499, calculo 137.366 s, total con red 139.085 s
-servidor2 (servidor2): filas 2500 a 4999, calculo 138.389 s, total con red 140.094 s
-servidor3 (servidor3): filas 5000 a 7499, calculo 137.254 s, total con red 138.991 s
-servidor4 (servidor4): filas 7500 a 9999, calculo 138.100 s, total con red 139.741 s
-Tiempo total (envio + calculo + recoleccion): 140.097 s
+servidor1 (servidor1): filas 0 a 2499, calculo 145.734 s, total con red 147.671 s
+servidor2 (servidor2): filas 2500 a 4999, calculo 144.895 s, total con red 146.937 s
+servidor3 (servidor3): filas 5000 a 7499, calculo 146.012 s, total con red 147.863 s
+servidor4 (servidor4): filas 7500 a 9999, calculo 145.350 s, total con red 147.196 s
+Tiempo total (envio + calculo + recoleccion): 147.864 s
+Todos los valores de C son 10000 (= N): CORRECTO
 ```
 
 Mientras corre se puede ver que los 4 trabajan al mismo tiempo:
